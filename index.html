@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>Territory — paper.io-class</title>
+<style>
+  :root{
+    --bg:#0e1116; --panel:#161b24; --line:#222b38; --ink:#e7edf5; --muted:#7e8a9c;
+    --accent:#5ee0c0;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;height:100%;background:var(--bg);overflow:hidden;
+    font-family:"DM Mono",ui-monospace,"SFMono-Regular",Menlo,monospace;color:var(--ink);
+    -webkit-user-select:none;user-select:none;touch-action:none;}
+  canvas{display:block;position:fixed;inset:0;width:100vw;height:100vh;}
+
+  /* HUD */
+  #hud{position:fixed;inset:0;pointer-events:none;}
+  .card{background:rgba(22,27,36,.82);border:1px solid var(--line);border-radius:14px;
+    backdrop-filter:blur(8px);}
+  #board{position:absolute;top:14px;right:14px;width:230px;padding:12px 14px;}
+  #board h2{margin:0 0 10px;font-size:11px;letter-spacing:.18em;text-transform:uppercase;
+    color:var(--muted);font-weight:600;}
+  .row{display:flex;align-items:center;gap:8px;font-size:13px;padding:3px 0;}
+  .dot{width:11px;height:11px;border-radius:3px;flex:0 0 auto;}
+  .nm{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .pct{color:var(--muted);font-variant-numeric:tabular-nums;}
+  .me .nm{color:var(--accent);font-weight:700;}
+
+  #mystat{position:absolute;left:14px;top:14px;padding:12px 16px;}
+  #mystat .big{font-size:30px;font-weight:700;letter-spacing:.02em;line-height:1;}
+  #mystat .lab{font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--muted);margin-top:6px;}
+
+  #status{position:absolute;left:50%;bottom:18px;transform:translateX(-50%);
+    font-size:12px;color:var(--muted);letter-spacing:.05em;}
+
+  /* overlays */
+  .screen{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
+    background:radial-gradient(120% 120% at 50% 30%, #131a26 0%, #0b0e13 70%);z-index:10;}
+  .screen .inner{width:min(440px,90vw);padding:34px 32px;text-align:center;}
+  .title{font-size:13px;letter-spacing:.42em;text-transform:uppercase;color:var(--accent);}
+  .head{font-size:40px;margin:10px 0 4px;font-weight:800;letter-spacing:-.01em;}
+  .sub{color:var(--muted);font-size:13px;margin-bottom:24px;line-height:1.6;}
+  input{width:100%;padding:13px 14px;border-radius:10px;border:1px solid var(--line);
+    background:#0c1017;color:var(--ink);font:inherit;font-size:15px;text-align:center;margin-bottom:14px;}
+  input:focus{outline:none;border-color:var(--accent);}
+  button{width:100%;padding:13px;border:none;border-radius:10px;background:var(--accent);
+    color:#062018;font:inherit;font-weight:700;font-size:15px;cursor:pointer;letter-spacing:.04em;
+    pointer-events:auto;transition:transform .08s ease,filter .15s ease;}
+  button:hover{filter:brightness(1.07);} button:active{transform:translateY(1px);}
+  .hint{margin-top:18px;font-size:11px;color:var(--muted);letter-spacing:.04em;line-height:1.7;}
+  .hidden{display:none!important;}
+  .deathreason{font-size:12px;color:#ff7a7a;letter-spacing:.1em;text-transform:uppercase;margin-bottom:6px;}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="hud" class="hidden">
+  <div id="mystat" class="card">
+    <div class="big" id="myArea">0.00%</div>
+    <div class="lab">your territory</div>
+  </div>
+  <div id="board" class="card">
+    <h2>Leaderboard</h2>
+    <div id="boardRows"></div>
+  </div>
+  <div id="status">connecting…</div>
+</div>
+
+<!-- JOIN -->
+<div id="joinScreen" class="screen">
+  <div class="inner card" style="border:none;background:transparent;">
+    <div class="title">Territory</div>
+    <div class="head">Claim the map.</div>
+    <div class="sub">Leave home, draw a loop, return to fill it.<br>Touch any trail — including your own — and you're out.</div>
+    <input id="nameInput" maxlength="16" placeholder="your name" autocomplete="off" />
+    <button id="playBtn">Enter the world</button>
+    <div class="hint">↑ ↓ ← → or W A S D to steer · 90° turns only</div>
+  </div>
+</div>
+
+<!-- DEATH -->
+<div id="deathScreen" class="screen hidden">
+  <div class="inner card" style="border:none;background:transparent;">
+    <div class="deathreason" id="deathReason">eliminated</div>
+    <div class="head">You were cut.</div>
+    <div class="sub" id="deathStat">Respawning…</div>
+    <button id="respawnBtn" class="hidden">Back in</button>
+  </div>
+</div>
+
+<script>
+(() => {
+  'use strict';
+  const cv = document.getElementById('game');
+  const ctx = cv.getContext('2d');
+  const CELL_SCREEN = 14;              // px per cell at base zoom (render only)
+
+  let GW = 160, GH = 160;
+  let myId = null;
+  let ws = null;
+  let connected = false;
+
+  // server state (latest snapshot)
+  let owner = null, trail = null;      // Uint8Array, decoded from RLE
+  let ents = new Map();                // id -> {x,y,h,color,name,area,outside,bot,dead}
+  // smoothed render state per entity (interpolation toward server pos)
+  let view = new Map();                // id -> {x,y}
+
+  // camera (smoothed)
+  let camX = GW / 2, camY = GH / 2;
+
+  // ---- DOM ----
+  const hud = document.getElementById('hud');
+  const joinScreen = document.getElementById('joinScreen');
+  const deathScreen = document.getElementById('deathScreen');
+  const nameInput = document.getElementById('nameInput');
+  const statusEl = document.getElementById('status');
+  const myAreaEl = document.getElementById('myArea');
+  const boardRows = document.getElementById('boardRows');
+  const deathReason = document.getElementById('deathReason');
+  const deathStat = document.getElementById('deathStat');
+  const respawnBtn = document.getElementById('respawnBtn');
+
+  function resize(){ cv.width = innerWidth * devicePixelRatio; cv.height = innerHeight * devicePixelRatio;
+    ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0); }
+  addEventListener('resize', resize); resize();
+
+  function rleDecode(rle, len){
+    const out = new Uint8Array(len); let p = 0;
+    for (let i=0;i<rle.length;i+=2){ const v=rle[i], run=rle[i+1];
+      for (let k=0;k<run;k++) out[p++]=v; }
+    return out;
+  }
+
+  // ---- WS ----
+  function connect(name){
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    ws = new WebSocket(`${proto}://${location.host}`);
+    ws.onopen = () => { connected = true; statusEl.textContent='joining…';
+      ws.send(JSON.stringify({t:'join', name})); };
+    ws.onclose = () => { connected = false; statusEl.textContent='disconnected — refresh to reconnect'; };
+    ws.onerror = () => { statusEl.textContent='connection error'; };
+    ws.onmessage = (ev) => {
+      const m = JSON.parse(ev.data);
+      if (m.t==='welcome'){ myId=m.id; GW=m.w; GH=m.h; hud.classList.remove('hidden');
+        joinScreen.classList.add('hidden'); statusEl.textContent=''; }
+      else if (m.t==='full'){ statusEl.textContent='world is full — try again shortly'; }
+      else if (m.t==='state'){ applyState(m); }
+      else if (m.t==='death'){ onDeath(m.reason); }
+      else if (m.t==='respawn'){ onRespawn(); }
+    };
+  }
+
+  function applyState(m){
+    GW=m.w; GH=m.h;
+    owner = rleDecode(m.owner, GW*GH);
+    trail = rleDecode(m.trail, GW*GH);
+    const seen = new Set();
+    for (const e of m.ents){
+      seen.add(e.id);
+      ents.set(e.id, {x:e.x,y:e.y,h:e.h,color:e.c,name:e.n,area:e.a,outside:e.o,bot:e.b,dead:e.d});
+      if (!view.has(e.id)) view.set(e.id, {x:e.x,y:e.y});
+    }
+    for (const id of [...ents.keys()]) if(!seen.has(id)){ ents.delete(id); view.delete(id); }
+    updateHud();
+  }
+
+  function updateHud(){
+    const total = GW*GH;
+    const list = [...ents.entries()].map(([id,e])=>({id,...e}))
+      .sort((a,b)=>b.area-a.area).slice(0,8);
+    boardRows.innerHTML = list.map(e=>{
+      const pct = (e.area/total*100).toFixed(2);
+      const me = e.id===myId ? ' me':'';
+      const tag = e.bot ? '' : '';
+      return `<div class="row${me}"><span class="dot" style="background:${e.color}"></span>`+
+             `<span class="nm">${escapeHtml(e.name)}${tag}</span><span class="pct">${pct}%</span></div>`;
+    }).join('');
+    const me = ents.get(myId);
+    if (me) myAreaEl.textContent = (me.area/total*100).toFixed(2)+'%';
+  }
+  function escapeHtml(s){return (''+s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+
+  // ---- INPUT (intent only) ----
+  const KEYMAP = {ArrowUp:'N',KeyW:'N',ArrowRight:'E',KeyD:'E',ArrowDown:'S',KeyS:'S',ArrowLeft:'W',KeyA:'W'};
+  addEventListener('keydown', (e)=>{
+    const d = KEYMAP[e.code];
+    if (d && connected && ws && ws.readyState===1){ ws.send(JSON.stringify({t:'turn', d})); e.preventDefault(); }
+  });
+  // touch swipe -> discrete turn
+  let tsx=0,tsy=0;
+  addEventListener('touchstart',e=>{const t=e.changedTouches[0];tsx=t.clientX;tsy=t.clientY;},{passive:true});
+  addEventListener('touchend',e=>{const t=e.changedTouches[0];const dx=t.clientX-tsx,dy=t.clientY-tsy;
+    if(Math.abs(dx)<18&&Math.abs(dy)<18)return; let d;
+    if(Math.abs(dx)>Math.abs(dy)) d=dx>0?'E':'W'; else d=dy>0?'S':'N';
+    if(connected&&ws&&ws.readyState===1) ws.send(JSON.stringify({t:'turn',d}));},{passive:true});
+
+  // ---- DEATH / RESPAWN ----
+  function onDeath(reason){
+    const labels={cut:'trail cut',self:'crossed your own trail',wall:'hit the border'};
+    deathReason.textContent = labels[reason]||'eliminated';
+    const me = ents.get(myId);
+    deathStat.textContent = 'Respawning…';
+    deathScreen.classList.remove('hidden');
+    respawnBtn.classList.add('hidden');
+    setTimeout(()=>{ respawnBtn.classList.remove('hidden'); deathStat.textContent='Ready when you are.'; }, 1500);
+  }
+  function onRespawn(){ deathScreen.classList.add('hidden'); }
+  respawnBtn.onclick = ()=> deathScreen.classList.add('hidden');
+
+  // ---- RENDER ----
+  function lerp(a,b,t){return a+(b-a)*t;}
+
+  function draw(){
+    requestAnimationFrame(draw);
+    const W=innerWidth,H=innerHeight;
+    ctx.clearRect(0,0,W,H);
+    if(!owner){return;}
+
+    // interpolate entity render positions toward latest server pos
+    for(const [id,e] of ents){
+      const v=view.get(id); if(!v)continue;
+      v.x=lerp(v.x,e.x,0.35); v.y=lerp(v.y,e.y,0.35);
+    }
+    // camera follows me
+    const me = view.get(myId);
+    if(me){ camX=lerp(camX,me.x,0.12); camY=lerp(camY,me.y,0.12); }
+    camX=Math.max(0,Math.min(GW,camX)); camY=Math.max(0,Math.min(GH,camY));
+
+    const cs=CELL_SCREEN;
+    const ox = W/2 - camX*cs;
+    const oy = H/2 - camY*cs;
+
+    // visible cell range (cull)
+    const x0=Math.max(0,Math.floor((-ox)/cs)-1), x1=Math.min(GW-1,Math.ceil((W-ox)/cs)+1);
+    const y0=Math.max(0,Math.floor((-oy)/cs)-1), y1=Math.min(GH-1,Math.ceil((H-oy)/cs)+1);
+
+    // map backdrop
+    ctx.fillStyle='#11151c';
+    ctx.fillRect(ox,oy,GW*cs,GH*cs);
+
+    // color lookup
+    const colorOf=(id)=>{const e=ents.get(id);return e?e.color:'#333';};
+
+    // owned territory
+    for(let y=y0;y<=y1;y++){
+      for(let x=x0;x<=x1;x++){
+        const o=owner[y*GW+x];
+        if(o!==0){ ctx.fillStyle=colorOf(o); ctx.globalAlpha=0.92;
+          ctx.fillRect(ox+x*cs, oy+y*cs, cs+1, cs+1); }
+      }
+    }
+    ctx.globalAlpha=1;
+    // trails (brighter, slightly inset)
+    for(let y=y0;y<=y1;y++){
+      for(let x=x0;x<=x1;x++){
+        const t=trail[y*GW+x];
+        if(t!==0){ ctx.fillStyle=colorOf(t); ctx.globalAlpha=0.6;
+          ctx.fillRect(ox+x*cs+cs*0.18, oy+y*cs+cs*0.18, cs*0.64, cs*0.64); }
+      }
+    }
+    ctx.globalAlpha=1;
+
+    // grid sheen
+    ctx.strokeStyle='rgba(255,255,255,0.03)';ctx.lineWidth=1;
+    ctx.beginPath();
+    for(let x=x0;x<=x1+1;x++){const sx=ox+x*cs;ctx.moveTo(sx,oy+y0*cs);ctx.lineTo(sx,oy+(y1+1)*cs);}
+    for(let y=y0;y<=y1+1;y++){const sy=oy+y*cs;ctx.moveTo(ox+x0*cs,sy);ctx.lineTo(ox+(x1+1)*cs,sy);}
+    ctx.stroke();
+
+    // map border
+    ctx.strokeStyle='rgba(94,224,192,0.5)';ctx.lineWidth=2;
+    ctx.strokeRect(ox,oy,GW*cs,GH*cs);
+
+    // avatars
+    for(const [id,e] of ents){
+      if(e.dead)continue;
+      const v=view.get(id); if(!v)continue;
+      const sx=ox+v.x*cs, sy=oy+v.y*cs;
+      ctx.fillStyle=e.color;
+      ctx.strokeStyle=id===myId?'#fff':'rgba(0,0,0,0.55)';
+      ctx.lineWidth=id===myId?3:2;
+      const r=cs*0.46;
+      ctx.beginPath(); ctx.roundRect(sx-r,sy-r,r*2,r*2,4); ctx.fill(); ctx.stroke();
+      // name
+      if(id===myId || !e.bot){
+        ctx.fillStyle='rgba(231,237,245,0.85)';ctx.font='11px ui-monospace,monospace';
+        ctx.textAlign='center';
+        ctx.fillText(e.name, sx, sy-r-5);
+      }
+    }
+  }
+  requestAnimationFrame(draw);
+
+  // ---- start ----
+  document.getElementById('playBtn').onclick = ()=>{
+    const name=(nameInput.value||'Player').trim().slice(0,16)||'Player';
+    connect(name);
+  };
+  nameInput.addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('playBtn').click();});
+  nameInput.focus();
+})();
+</script>
+</body>
+</html>
