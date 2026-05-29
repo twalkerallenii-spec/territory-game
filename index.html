@@ -19,7 +19,7 @@
   #hud{position:fixed;inset:0;pointer-events:none;}
   .card{background:rgba(255,255,255,.86);border:1px solid var(--line);border-radius:14px;
     backdrop-filter:blur(8px);box-shadow:0 6px 22px rgba(120,110,90,.12);}
-  #board{position:absolute;top:14px;right:14px;width:230px;padding:12px 14px;}
+  #board{position:absolute;top:64px;right:14px;width:230px;padding:12px 14px;}
   #board h2{margin:0 0 10px;font-size:11px;letter-spacing:.18em;text-transform:uppercase;
     color:var(--muted);font-weight:600;}
   .row{display:flex;align-items:center;gap:8px;font-size:13px;padding:3px 0;}
@@ -27,6 +27,13 @@
   .nm{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   .pct{color:var(--muted);font-variant-numeric:tabular-nums;}
   .me .nm{color:var(--accent);font-weight:700;}
+
+  #homeBtn{position:absolute;top:14px;right:14px;width:40px;height:40px;border-radius:12px;
+    border:1px solid var(--line);background:rgba(255,255,255,.86);color:#6a6253;cursor:pointer;
+    display:flex;align-items:center;justify-content:center;pointer-events:auto;
+    box-shadow:0 6px 22px rgba(120,110,90,.12);transition:transform .08s ease,color .15s ease;padding:0;}
+  #homeBtn:hover{color:var(--accent);transform:translateY(-1px);}
+  #homeBtn:active{transform:translateY(0);}
 
   #mystat{position:absolute;left:14px;top:14px;padding:12px 16px;}
   #mystat .big{font-size:30px;font-weight:700;letter-spacing:.02em;line-height:1;}
@@ -36,12 +43,29 @@
     font-size:12px;color:var(--muted);letter-spacing:.05em;}
 
   /* overlays */
-  .screen{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
-    background:radial-gradient(120% 120% at 50% 30%, #fbf9f4 0%, #ece7dc 70%);z-index:10;}
-  .screen .inner{width:min(440px,90vw);padding:34px 32px;text-align:center;}
-  .title{font-size:13px;letter-spacing:.42em;text-transform:uppercase;color:var(--accent);}
-  .head{font-size:40px;margin:10px 0 4px;font-weight:800;letter-spacing:-.01em;color:var(--ink);}
-  .sub{color:var(--muted);font-size:13px;margin-bottom:24px;line-height:1.6;}
+  .screen{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;z-index:10;
+    background:
+      linear-gradient(rgba(120,110,90,.05) 1px, transparent 1px) 0 0/26px 26px,
+      linear-gradient(90deg, rgba(120,110,90,.05) 1px, transparent 1px) 0 0/26px 26px,
+      radial-gradient(130% 130% at 50% 20%, #fdfbf6 0%, #ece6da 75%);
+    overflow:hidden;}
+  .joinwrap{position:relative;width:min(460px,92vw);}
+  .floaties{position:absolute;inset:-120px -160px;z-index:0;pointer-events:none;}
+  .floaties i{position:absolute;display:block;border-radius:7px;opacity:.5;
+    box-shadow:0 8px 22px rgba(120,110,90,.18);animation:bob 7s ease-in-out infinite;}
+  @keyframes bob{0%,100%{transform:translateY(0) rotate(0)}50%{transform:translateY(-14px) rotate(6deg)}}
+  .inner{position:relative;z-index:1;width:100%;padding:38px 34px 30px;text-align:center;
+    background:rgba(255,255,255,.9);border:1px solid var(--line);border-radius:22px;
+    box-shadow:0 24px 60px rgba(120,105,80,.22), inset 0 1px 0 rgba(255,255,255,.7);backdrop-filter:blur(10px);}
+  .logo{display:flex;gap:7px;justify-content:center;margin-bottom:16px;}
+  .logo .sq{width:26px;height:26px;border-radius:7px;position:relative;}
+  .logo .sq::after{content:"";position:absolute;inset:5px 5px auto auto;width:5px;height:5px;border-radius:50%;background:#fff;box-shadow:7px 0 0 #fff;}
+  .logo .sq1{background:#e6194b;transform:rotate(-8deg);}
+  .logo .sq2{background:#3cb44b;transform:translateY(-4px);}
+  .logo .sq3{background:#4363d8;transform:rotate(8deg);}
+  .title{font-size:12px;letter-spacing:.5em;text-transform:uppercase;color:var(--accent);font-weight:700;padding-left:.5em;}
+  .head{font-size:42px;margin:6px 0 8px;font-weight:800;letter-spacing:-.02em;color:var(--ink);}
+  .sub{color:var(--muted);font-size:13px;margin-bottom:24px;line-height:1.65;}
   input{width:100%;padding:13px 14px;border-radius:10px;border:1px solid var(--line);
     background:#fff;color:var(--ink);font:inherit;font-size:15px;text-align:center;margin-bottom:14px;}
   input:focus{outline:none;border-color:var(--accent);}
@@ -62,6 +86,9 @@
     <div class="big" id="myArea">0.00%</div>
     <div class="lab">your territory</div>
   </div>
+  <button id="homeBtn" title="Back to menu" aria-label="Home">
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/></svg>
+  </button>
   <div id="board" class="card">
     <h2>Leaderboard</h2>
     <div id="boardRows"></div>
@@ -71,13 +98,22 @@
 
 <!-- JOIN -->
 <div id="joinScreen" class="screen">
-  <div class="inner card" style="border:none;background:transparent;">
-    <div class="title">Territory</div>
-    <div class="head">Claim the map.</div>
-    <div class="sub">Leave home, draw a loop, return to fill it.<br>Cut a rival's trail and you steal everything they own.</div>
-    <input id="nameInput" maxlength="16" placeholder="your name" autocomplete="off" />
-    <button id="playBtn">Enter the world</button>
-    <div class="hint">↑ ↓ ← → or W A S D to steer · 90° turns · SPACE to respawn</div>
+  <div class="joinwrap">
+    <div class="floaties" id="floaties"></div>
+    <div class="inner">
+      <div class="logo">
+        <span class="sq sq1"></span><span class="sq sq2"></span><span class="sq sq3"></span>
+      </div>
+      <div class="title">Territory</div>
+      <div class="head">Claim the map.</div>
+      <div class="sub">Leave home, draw a loop, return to fill it.<br>Cut a rival's trail and you steal everything they own.</div>
+      <input id="nameInput" maxlength="16" placeholder="enter your name" autocomplete="off" />
+      <button id="playBtn">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" style="vertical-align:-3px;margin-right:8px"><path d="M8 5v14l11-7z"/></svg>
+        Play
+      </button>
+      <div class="hint">↑ ↓ ← → or W A S D to steer · SPACE to respawn</div>
+    </div>
   </div>
 </div>
 
@@ -212,7 +248,7 @@
 
   // ---- DEATH / RESPAWN ----
   function onDeath(reason, killerId){
-    const labels={cut:'cut by a rival',self:'crossed your own trail',wall:'hit the border'};
+    const labels={cut:'cut by a rival',self:'crossed your own trail'};
     deathReason.textContent = labels[reason]||'eliminated';
     isDead = true;
     // Spectate the killer if there is one; otherwise free-cam stays where we died.
@@ -312,34 +348,69 @@
     ctx.strokeStyle='rgba(120,110,90,0.5)';ctx.lineWidth=3;
     ctx.strokeRect(ox,oy,GW*cs,GH*cs);
 
-    // --- avatars (smaller, soft shadow, rounded) ---
+    // --- avatars: rounded square in the player's color, with a little face ---
     for(const [id,e] of ents){
       if(e.dead)continue;
       const v=view.get(id); if(!v)continue;
       const sx=ox+v.x*cs, sy=oy+v.y*cs;
-      const r=cs*0.30;                          // smaller than before (was 0.46)
+      const r=cs*0.32;
       const mine=id===myId, watched=(isDead&&id===spectateId);
       // soft contact shadow
       ctx.save();
-      ctx.fillStyle='rgba(70,60,45,0.25)';
-      roundRect(sx-r+cs*0.07, sy-r+cs*0.1, r*2, r*2, r*0.5); ctx.fill();
+      ctx.fillStyle='rgba(70,60,45,0.22)';
+      roundRect(sx-r+cs*0.07, sy-r+cs*0.11, r*2, r*2, r*0.45); ctx.fill();
       ctx.restore();
-      // body
+      // body (border is a darker shade of the same color, like paper.io)
       ctx.fillStyle=e.color;
-      ctx.strokeStyle = mine?'#222' : watched?'#fff' : 'rgba(40,35,25,0.55)';
-      ctx.lineWidth = mine||watched?2.5:1.5;
-      roundRect(sx-r,sy-r,r*2,r*2,r*0.5); ctx.fill(); ctx.stroke();
+      ctx.strokeStyle = shade(e.color,-0.35);
+      ctx.lineWidth = (mine||watched)?3:2;
+      roundRect(sx-r,sy-r,r*2,r*2,r*0.45); ctx.fill(); ctx.stroke();
+      // highlight ring for me / spectated killer
+      if(mine||watched){
+        ctx.strokeStyle = mine ? 'rgba(255,255,255,0.9)' : '#fff';
+        ctx.lineWidth=1.5;
+        roundRect(sx-r+2,sy-r+2,r*2-4,r*2-4,r*0.4); ctx.stroke();
+      }
+      // --- face: two eyes looking in the heading direction ---
+      const dirv = {N:[0,-1],S:[0,1],E:[1,0],W:[-1,0]}[e.h] || [0,1];
+      const eyeR=Math.max(1.6,r*0.22), pupR=Math.max(0.9,eyeR*0.5);
+      const eyeOff=r*0.42;                       // separation across the face
+      // perpendicular axis for placing the two eyes side by side
+      const perp=[ -dirv[1], dirv[0] ];
+      // eyes sit slightly toward the front of the face
+      const front=r*0.26;
+      for(const s of [-1,1]){
+        const ex=sx + perp[0]*eyeOff*s + dirv[0]*front;
+        const ey=sy + perp[1]*eyeOff*s + dirv[1]*front;
+        ctx.fillStyle='#fff';
+        ctx.beginPath(); ctx.arc(ex,ey,eyeR,0,Math.PI*2); ctx.fill();
+        // pupil pushed toward the heading
+        ctx.fillStyle='#222';
+        ctx.beginPath(); ctx.arc(ex+dirv[0]*eyeR*0.4, ey+dirv[1]*eyeR*0.4, pupR,0,Math.PI*2); ctx.fill();
+      }
       // name tag (me, watched target, and all humans)
       if(mine || watched || !e.bot){
         const label=mine?e.name:(watched?e.name+' (killer)':e.name);
         ctx.font='600 11px ui-monospace,monospace';ctx.textAlign='center';
         const tw=ctx.measureText(label).width;
-        ctx.fillStyle='rgba(255,255,255,0.82)';
-        roundRect(sx-tw/2-5, sy-r-19, tw+10, 15, 5); ctx.fill();
+        ctx.fillStyle='rgba(255,255,255,0.85)';
+        roundRect(sx-tw/2-5, sy-r-20, tw+10, 15, 5); ctx.fill();
         ctx.fillStyle='#2b2b2b';
-        ctx.fillText(label, sx, sy-r-8);
+        ctx.fillText(label, sx, sy-r-9);
       }
     }
+  }
+  // darken/lighten a hex or hsl color by amt (-1..1)
+  function shade(col, amt){
+    if(col.startsWith('hsl')){
+      const m=col.match(/hsl\((\d+),\s*(\d+)%?,\s*(\d+)%?\)/);
+      if(m){ let l=Math.max(0,Math.min(100, +m[3] + amt*100)); return `hsl(${m[1]},${m[2]}%,${l|0}%)`; }
+      return col;
+    }
+    let c=col.replace('#',''); if(c.length===3)c=c.split('').map(x=>x+x).join('');
+    let r=parseInt(c.slice(0,2),16),g=parseInt(c.slice(2,4),16),b=parseInt(c.slice(4,6),16);
+    const f=x=>Math.max(0,Math.min(255, Math.round(x + amt*255)));
+    return `rgb(${f(r)},${f(g)},${f(b)})`;
   }
   // helper used by render
   function roundRect(x,y,w,h,r){
@@ -361,6 +432,35 @@
   };
   nameInput.addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('playBtn').click();});
   nameInput.focus();
+
+  // decorative floating paper squares on the menu
+  (function makeFloaties(){
+    const wrap=document.getElementById('floaties'); if(!wrap)return;
+    const cols=['#e6194b','#3cb44b','#4363d8','#f58231','#911eb4','#1ba3a3','#f032e6','#e8762a'];
+    for(let k=0;k<8;k++){
+      const i=document.createElement('i');
+      const sz=22+Math.random()*30;
+      i.style.width=i.style.height=sz+'px';
+      i.style.background=cols[k%cols.length];
+      i.style.left=(Math.random()*100)+'%';
+      i.style.top=(Math.random()*100)+'%';
+      i.style.animationDelay=(-Math.random()*7)+'s';
+      i.style.animationDuration=(6+Math.random()*4)+'s';
+      wrap.appendChild(i);
+    }
+  })();
+
+  // ---- home button: leave the world, back to the menu ----
+  document.getElementById('homeBtn').onclick = ()=>{
+    if(ws){ try{ws.close();}catch(_){ } ws=null; }
+    connected=false; isDead=false; spectateId=null; myId=null;
+    owner=null; trail=null; ents.clear(); view.clear();
+    hud.classList.add('hidden');
+    deathScreen.classList.add('hidden');
+    joinScreen.classList.remove('hidden');
+    statusEl.textContent='';
+    nameInput.focus();
+  };
 })();
 </script>
 </body>

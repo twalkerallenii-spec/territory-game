@@ -26,12 +26,14 @@ const PORT = process.env.PORT || 3000;
 const CELL_PER_TICK = CELLS_PER_SEC / TICK_RATE;
 
 // Distinct, saturated colors that read clearly on a white paper background.
+// 36 hand-picked hues — more than ROOM_CAP, so no two live players ever share.
 const PALETTE = [
   '#e6194b', '#3cb44b', '#4363d8', '#f58231', '#911eb4', '#1ba3a3',
   '#f032e6', '#9bb800', '#e8762a', '#008080', '#a05bd6', '#9a6324',
   '#c79a00', '#d11141', '#2a9d4a', '#5a6e00', '#c2691f', '#000075',
   '#6b5b95', '#88154b', '#1f7a8c', '#b03a2e', '#2874a6', '#7d3c98',
-  '#cb4335', '#117864', '#b9770e', '#4a235a',
+  '#cb4335', '#117864', '#b9770e', '#4a235a', '#1e6091', '#d4661a',
+  '#7a1fa2', '#2e8b57', '#c2185b', '#5d4037', '#00838f', '#827717',
 ];
 
 // ---- WORLD STATE -----------------------------------------------------------
@@ -47,10 +49,19 @@ const OPP = { N: 'S', S: 'N', E: 'W', W: 'E' };
 let nextId = 1;                       // entity ids; 0 reserved for neutral
 const entities = new Map();           // id -> entity
 
+// Strictly unique color per live entity: pick an unused palette color at random;
+// if the palette is somehow exhausted, synthesize a distinct HSL hue.
 function freeColor() {
   const used = new Set([...entities.values()].map(e => e.color));
-  for (const c of PALETTE) if (!used.has(c)) return c;
-  return PALETTE[Math.floor(Math.random() * PALETTE.length)];
+  const avail = PALETTE.filter(c => !used.has(c));
+  if (avail.length) return avail[(Math.random() * avail.length) | 0];
+  // fallback: spin the hue wheel until we land on an unused color
+  for (let k = 0; k < 360; k++) {
+    const hue = (k * 47) % 360;                    // 47 is coprime-ish to 360
+    const c = `hsl(${hue},70%,45%)`;
+    if (!used.has(c)) return c;
+  }
+  return `hsl(${(Math.random() * 360) | 0},70%,45%)`;
 }
 
 // ---- SPAWNING (Blueprint Sec 5C) -------------------------------------------
@@ -254,7 +265,7 @@ function captureTerritory(e) {
 
 // ---- LOGICAL STEP into a new cell (Blueprint Sec 3A) -----------------------
 function enterCell(e, x, y) {
-  if (!inBounds(x, y)) { killEntity(e, 'wall'); return; }   // RULE 5
+  if (!inBounds(x, y)) { return; }   // wall is handled in advance() (slide, no death)
   const i = idx(x, y);
 
   // Stepping onto ANY active trail kills that trail's owner (RULE 1 & 2).
@@ -293,8 +304,31 @@ function enterCell(e, x, y) {
 function advance(e) {
   if (e.dead) return;
   const [dx, dy] = DIRS[e.heading];
-  e.px += dx * CELL_PER_TICK;
-  e.py += dy * CELL_PER_TICK;
+
+  // WALL = slide, don't die (Blueprint Sec 4A/Rule 5 clamp option). If the next
+  // cell in our heading is off the map, apply any queued turn immediately; if
+  // that still points into the wall, hold position at the edge (no movement,
+  // no death) until the player turns to a legal direction.
+  const nextCx = e.cx + dx, nextCy = e.cy + dy;
+  if (!inBounds(nextCx, nextCy)) {
+    if (e.pendingTurn && e.pendingTurn !== OPP[e.heading]) {
+      const [tx, ty] = DIRS[e.pendingTurn];
+      if (inBounds(e.cx + tx, e.cy + ty)) {
+        e.heading = e.pendingTurn;
+        e.pendingTurn = null;
+      }
+    }
+    // re-evaluate after a possible turn
+    const [hx, hy] = DIRS[e.heading];
+    if (!inBounds(e.cx + hx, e.cy + hy)) {
+      // still facing the wall: clamp at cell center and wait
+      e.px = e.cx + 0.5; e.py = e.cy + 0.5;
+      return;
+    }
+  }
+
+  e.px += DIRS[e.heading][0] * CELL_PER_TICK;
+  e.py += DIRS[e.heading][1] * CELL_PER_TICK;
 
   // Has the continuous position crossed into a new cell center?
   const ncx = Math.floor(e.px);
