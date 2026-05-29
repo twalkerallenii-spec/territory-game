@@ -1,0 +1,1018 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>Territory — paper.io-class</title>
+<style>
+  :root{
+    --bg:#f4f1ea; --panel:#ffffff; --line:#e3ddd0; --ink:#2b2b2b; --muted:#8a8275;
+    --accent:#ff5a7a;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;height:100%;background:var(--bg);overflow:hidden;
+    font-family:"DM Mono",ui-monospace,"SFMono-Regular",Menlo,monospace;color:var(--ink);
+    -webkit-user-select:none;user-select:none;touch-action:none;}
+  canvas{display:block;position:fixed;inset:0;width:100vw;height:100vh;}
+
+  /* HUD */
+  #hud{position:fixed;inset:0;pointer-events:none;}
+  .card{background:rgba(255,255,255,.86);border:1px solid var(--line);border-radius:14px;
+    backdrop-filter:blur(8px);box-shadow:0 6px 22px rgba(120,110,90,.12);}
+  #board{position:absolute;top:64px;right:14px;width:230px;padding:12px 14px;}
+  #board h2{margin:0 0 10px;font-size:11px;letter-spacing:.18em;text-transform:uppercase;
+    color:var(--muted);font-weight:600;}
+  .row{display:flex;align-items:center;gap:8px;font-size:13px;padding:3px 0;}
+  .rank{width:16px;text-align:right;color:var(--muted);font-weight:700;font-variant-numeric:tabular-nums;}
+  .dot{width:11px;height:11px;border-radius:3px;flex:0 0 auto;}
+  .nm{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .pct{color:var(--muted);font-variant-numeric:tabular-nums;}
+  .me .nm{color:var(--accent);font-weight:700;}
+
+  #homeBtn{position:absolute;top:14px;right:14px;width:40px;height:40px;border-radius:12px;
+    border:1px solid var(--line);background:rgba(255,255,255,.86);color:#6a6253;cursor:pointer;
+    display:flex;align-items:center;justify-content:center;pointer-events:auto;
+    box-shadow:0 6px 22px rgba(120,110,90,.12);transition:transform .08s ease,color .15s ease;padding:0;}
+  #homeBtn:hover{color:var(--accent);transform:translateY(-1px);}
+  #homeBtn:active{transform:translateY(0);}
+
+  #mystat{position:absolute;left:14px;top:14px;padding:12px 16px;}
+  #mystat .big{font-size:30px;font-weight:700;letter-spacing:.02em;line-height:1;}
+  #mystat .lab{font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--muted);margin-top:6px;}
+
+
+  /* overlays */
+  .screen{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;z-index:10;
+    background:radial-gradient(130% 130% at 50% 30%, #3a5a52 0%, #243d38 55%, #1a2c28 100%);
+    overflow:hidden;}
+  #menuFx{position:absolute;inset:0;width:100%;height:100%;z-index:0;}
+  .joinwrap{position:relative;width:min(480px,92vw);z-index:1;}
+  .inner{position:relative;z-index:1;width:100%;padding:30px 32px 28px;text-align:center;
+    background:rgba(20,34,31,.55);border:1px solid rgba(255,255,255,.08);border-radius:24px;
+    box-shadow:0 30px 70px rgba(0,0,0,.4), inset 0 1px 0 rgba(255,255,255,.08);backdrop-filter:blur(10px);}
+  .logo3d{display:flex;justify-content:center;gap:2px;margin-bottom:4px;}
+  .logo3d .L{font-weight:800;font-size:54px;letter-spacing:1px;color:#eef3f0;line-height:1;
+    text-shadow:0 3px 0 #b9c4be, 0 5px 0 #98a6a0, 0 7px 10px rgba(0,0,0,.45);
+    animation:drop .6s cubic-bezier(.2,1.3,.4,1) backwards;animation-delay:calc(var(--d) * 0.07s);}
+  .logo3d .io{font-size:30px;align-self:flex-end;color:#ffd23f;margin-left:4px;
+    text-shadow:0 3px 0 #c79a18, 0 5px 8px rgba(0,0,0,.4);transform:translateY(-6px);}
+  @keyframes drop{from{opacity:0;transform:translateY(-26px) rotate(-8deg);}to{opacity:1;transform:translateY(0) rotate(0);}}
+  .sub{color:#c3d2cc;font-size:13px;margin:8px 0 20px;line-height:1.6;}
+  .modepick{display:flex;gap:10px;margin-bottom:14px;}
+  .modeopt{flex:1;background:rgba(255,255,255,.06);border:2px solid transparent;border-radius:14px;
+    padding:12px 8px;display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;
+    color:#dfeae6;transition:all .15s ease;box-shadow:none;pointer-events:auto;}
+  .modeopt:hover{background:rgba(255,255,255,.1);}
+  .modeopt.active{border-color:#ffd23f;background:rgba(255,210,63,.12);}
+  .modeopt .mi{font-size:22px;}
+  .modeopt .mt{font-weight:800;font-size:14px;}
+  .modeopt .md{font-size:10px;color:#9fb0aa;letter-spacing:.02em;}
+  input{width:100%;padding:13px 14px;border-radius:10px;border:1px solid var(--line);
+    background:#fff;color:var(--ink);font:inherit;font-size:15px;text-align:center;margin-bottom:14px;}
+  input:focus{outline:none;border-color:var(--accent);}
+  button{width:100%;padding:13px;border:none;border-radius:10px;background:var(--accent);
+    color:#fff;font:inherit;font-weight:700;font-size:15px;cursor:pointer;letter-spacing:.04em;
+    pointer-events:auto;transition:transform .08s ease,filter .15s ease;box-shadow:0 6px 16px rgba(255,90,122,.3);}
+  button:hover{filter:brightness(1.05);} button:active{transform:translateY(1px);}
+  .hint{margin-top:18px;font-size:11px;color:var(--muted);letter-spacing:.04em;line-height:1.7;}
+  .hidden{display:none!important;}
+  .deathreason{font-size:12px;color:var(--accent);letter-spacing:.1em;text-transform:uppercase;margin-bottom:6px;}
+
+  /* coin bar + menu buttons */
+  .coinbar{position:absolute;top:18px;right:20px;background:rgba(255,255,255,.9);border:1px solid var(--line);
+    border-radius:999px;padding:8px 16px;font-weight:700;color:#7a5b15;z-index:2;box-shadow:0 6px 18px rgba(120,110,90,.15);}
+  .coinIcon{color:#f5b301;}
+  .menurow{display:flex;gap:10px;margin-top:12px;}
+  button.ghost{flex:1;background:rgba(255,255,255,.7);color:#5a5346;border:1px solid var(--line);
+    box-shadow:none;font-weight:700;}
+  button.ghost:hover{filter:none;background:#fff;color:var(--accent);}
+  #loadoutHint{color:var(--accent);min-height:14px;}
+
+  /* modals */
+  .modal{position:fixed;inset:0;z-index:20;display:flex;align-items:center;justify-content:center;
+    background:rgba(40,35,25,.45);backdrop-filter:blur(4px);}
+  .modalcard{width:min(640px,94vw);max-height:86vh;overflow:auto;background:#fdfbf6;border:1px solid var(--line);
+    border-radius:20px;padding:22px 22px 26px;box-shadow:0 30px 80px rgba(60,50,35,.35);}
+  .modalhead{display:flex;align-items:center;gap:12px;font-size:20px;font-weight:800;color:var(--ink);}
+  .modalhead .coinpill{margin-left:auto;font-size:14px;background:#fff7e0;border:1px solid #f0e0a8;
+    border-radius:999px;padding:5px 12px;color:#7a5b15;font-weight:700;}
+  .modalhead .x{background:none;border:none;font-size:18px;color:#9a8f7a;cursor:pointer;width:auto;padding:4px 8px;box-shadow:none;}
+  .modalsub{color:var(--muted);font-size:13px;margin:8px 0 16px;}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:12px;}
+  .item{border:1px solid var(--line);border-radius:14px;padding:14px;background:#fff;text-align:center;
+    display:flex;flex-direction:column;gap:8px;align-items:center;}
+  .item .ic{font-size:26px;}
+  .item .nm{font-weight:700;font-size:13px;color:var(--ink);}
+  .item .ds{font-size:11px;color:var(--muted);line-height:1.45;min-height:30px;}
+  .item .swatch{width:34px;height:34px;border-radius:9px;}
+  .item button{width:100%;padding:8px;font-size:12px;border-radius:9px;box-shadow:none;}
+  .item button.owned{background:#e8eee6;color:#3a6b3a;cursor:default;}
+  .item button.equip{background:#4a8;}
+  .item button.equipped{background:#2b7a4b;color:#fff;cursor:default;}
+  .item button.locked{background:#f0e0a8;color:#7a5b15;}
+  .item button.cant{background:#eee;color:#aaa;cursor:not-allowed;}
+
+  /* how-to-play steps */
+  .steps{display:flex;flex-direction:column;gap:12px;}
+  .step{display:flex;gap:14px;align-items:flex-start;background:#fff;border:1px solid var(--line);
+    border-radius:14px;padding:14px 16px;}
+  .step .num{flex:0 0 auto;width:30px;height:30px;border-radius:50%;background:var(--accent);color:#fff;
+    font-weight:800;display:flex;align-items:center;justify-content:center;font-size:15px;
+    box-shadow:0 4px 12px rgba(255,90,122,.35);}
+  .step .txt{font-size:13px;line-height:1.55;color:var(--ink);}
+  .step .txt b{font-weight:700;}
+
+  /* chat */
+  #chatToggle{position:absolute;left:14px;bottom:14px;width:44px;height:44px;border-radius:14px;
+    border:1px solid var(--line);background:rgba(255,255,255,.9);font-size:20px;cursor:pointer;z-index:6;
+    pointer-events:auto;box-shadow:0 6px 18px rgba(120,110,90,.18);padding:0;}
+  #chatPanel{position:absolute;left:14px;bottom:14px;width:min(320px,80vw);z-index:7;
+    background:rgba(255,255,255,.95);border:1px solid var(--line);border-radius:16px;overflow:hidden;
+    box-shadow:0 14px 40px rgba(120,105,80,.25);}
+  #chatLog{max-height:200px;overflow-y:auto;padding:12px 14px;font-size:13px;line-height:1.5;}
+  #chatLog .msg{margin-bottom:4px;word-wrap:break-word;}
+  #chatLog .msg b{font-weight:700;}
+  #chatInputRow{display:flex;gap:6px;padding:10px;border-top:1px solid var(--line);}
+  #chatInput{flex:1;margin:0;padding:9px 11px;font-size:13px;}
+  #chatSend{width:auto;padding:9px 14px;font-size:13px;box-shadow:none;}
+
+  /* minimap */
+  #minimap{position:absolute;right:14px;bottom:14px;width:150px;height:150px;padding:0;
+    border-radius:12px;background:rgba(255,255,255,.7);}
+  /* boost meter */
+  #boostWrap{position:absolute;left:14px;bottom:14px;width:200px;z-index:5;}
+  #boostBar{height:12px;border-radius:999px;background:rgba(255,255,255,.55);border:1px solid var(--line);
+    overflow:hidden;box-shadow:0 4px 14px rgba(120,110,90,.15);}
+  #boostFill{height:100%;width:100%;background:linear-gradient(90deg,#ffd23f,#ff9f1c);
+    transition:width .1s linear;}
+  #boostFill.ready{background:linear-gradient(90deg,#3cd070,#1ba85a);}
+  #boostFill.active{background:linear-gradient(90deg,#46f0f0,#1f9bd1);animation:boostPulse .6s ease-in-out infinite;}
+  @keyframes boostPulse{0%,100%{filter:brightness(1)}50%{filter:brightness(1.35)}}
+  #boostLabel{font-size:11px;color:#5a5346;margin-top:5px;text-align:center;font-weight:700;letter-spacing:.03em;}
+
+  /* battle-royale results */
+  #brResult{position:fixed;inset:0;z-index:14;display:flex;align-items:center;justify-content:center;
+    background:radial-gradient(120% 120% at 50% 30%, rgba(36,61,56,.85), rgba(20,32,28,.95));}
+  .brcard{text-align:center;color:#eef3f0;padding:36px 40px;}
+  .brplace{font-size:64px;font-weight:900;color:#ffd23f;text-shadow:0 4px 0 #c79a18;line-height:1;}
+  .brhead{font-size:30px;font-weight:800;margin:8px 0 4px;}
+  .brsub{color:#b9c8c2;font-size:14px;margin-bottom:22px;}
+  #brMenuBtn{pointer-events:auto;background:#ffd23f;color:#2b2b2b;border:none;border-radius:12px;
+    padding:12px 26px;font:inherit;font-weight:800;cursor:pointer;box-shadow:0 8px 20px rgba(0,0,0,.3);}
+
+  #status{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);
+    font-size:12px;color:var(--muted);letter-spacing:.05em;pointer-events:none;}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="hud" class="hidden">
+  <div id="mystat" class="card">
+    <div class="big" id="myArea">0.00%</div>
+    <div class="lab" id="myStatLab">your territory</div>
+  </div>
+  <button id="homeBtn" title="Back to menu" aria-label="Home">
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/></svg>
+  </button>
+  <div id="board" class="card">
+    <h2 id="boardTitle">Leaderboard</h2>
+    <div id="boardRows"></div>
+  </div>
+  <div id="boostWrap" class="hidden">
+    <div id="boostBar"><div id="boostFill"></div></div>
+    <div id="boostLabel">⚡ SHIFT to boost</div>
+  </div>
+  <canvas id="minimap" class="card"></canvas>
+  <div id="status">connecting…</div>
+</div>
+
+<!-- Battle Royale results -->
+<div id="brResult" class="hidden">
+  <div class="brcard">
+    <div class="brplace" id="brPlace">#3</div>
+    <div class="brhead" id="brHead">Eliminated</div>
+    <div class="brsub" id="brSub">You were cut down.</div>
+    <button id="brMenuBtn">Back to menu</button>
+  </div>
+</div>
+
+<!-- JOIN -->
+<div id="joinScreen" class="screen">
+  <canvas id="menuFx"></canvas>
+  <div class="coinbar" id="coinBar"><span class="coinIcon">●</span> <span id="coinAmt">0</span></div>
+  <div class="joinwrap">
+    <div class="inner">
+      <div class="logo3d" aria-label="Paper">
+        <span class="L" style="--d:0">P</span><span class="L" style="--d:1">A</span><span class="L" style="--d:2">P</span><span class="L" style="--d:3">E</span><span class="L" style="--d:4">R</span><span class="L io" style="--d:5">io</span>
+      </div>
+      <div class="sub">Leave home, draw a loop, return to fill it.<br>Cut a rival's trail and steal everything they own.</div>
+      <input id="nameInput" maxlength="16" placeholder="enter your name" autocomplete="off" />
+      <div class="modepick">
+        <button class="modeopt active" data-mode="classic">
+          <span class="mi">♾️</span><span class="mt">Classic</span><span class="md">Endless · respawn</span>
+        </button>
+        <button class="modeopt" data-mode="br">
+          <span class="mi">👑</span><span class="mt">Battle Royale</span><span class="md">One life · last wins</span>
+        </button>
+      </div>
+      <button id="playBtn">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" style="vertical-align:-3px;margin-right:8px"><path d="M8 5v14l11-7z"/></svg>
+        Play
+      </button>
+      <div class="menurow">
+        <button class="ghost" id="howBtn">❓ How to Play</button>
+        <button class="ghost" id="shopBtn">🛒 Shop</button>
+        <button class="ghost" id="skinsBtn">🎨 Skins</button>
+      </div>
+      <div class="hint">↑ ↓ ← → / WASD to steer · SHIFT to boost · SPACE to respawn</div>
+      <div class="hint" id="loadoutHint"></div>
+    </div>
+  </div>
+</div>
+
+<!-- HOW TO PLAY modal -->
+<div id="howModal" class="modal hidden">
+  <div class="modalcard">
+    <div class="modalhead"><span>❓ How to Play</span>
+      <button class="x" data-close>✕</button></div>
+    <p class="modalsub">Capture the most land. Here's all you need to know:</p>
+    <div class="steps">
+      <div class="step"><div class="num">1</div><div class="txt">
+        <b>Steer with the arrow keys or WASD.</b> You always move forward and turn in 90° angles. On phone, swipe a direction.</div></div>
+      <div class="step"><div class="num">2</div><div class="txt">
+        <b>Leave your home to draw a trail.</b> The moment you step off your own colored land, a trail follows behind you.</div></div>
+      <div class="step"><div class="num">3</div><div class="txt">
+        <b>Loop back home to claim land.</b> Return to your territory and everything your loop encloses becomes yours. Surround an enemy's land to take it all.</div></div>
+      <div class="step"><div class="num">4</div><div class="txt">
+        <b>Don't get cut.</b> If anyone touches your trail — including yourself — you lose your land. Cut a rival's trail and you steal theirs. Walls are safe; you slide along them.</div></div>
+      <div class="step"><div class="num">5</div><div class="txt">
+        <b>Win the board.</b> Climb the leaderboard, earn coins from kills and big captures, spend them in the Shop on power-ups (tap <b>SHIFT</b> to use Speed Boost), and try Battle Royale for one-life survival.</div></div>
+    </div>
+    <button id="howGotIt" style="margin-top:16px;">Got it — let's play</button>
+  </div>
+</div>
+
+<!-- SHOP modal -->
+<div id="shopModal" class="modal hidden">
+  <div class="modalcard">
+    <div class="modalhead"><span>🛒 Power-up Shop</span>
+      <span class="coinpill"><span class="coinIcon">●</span> <span id="shopCoins">0</span></span>
+      <button class="x" data-close>✕</button></div>
+    <p class="modalsub">Buy a power-up, then equip up to 3 for your next match. Effects last one life.</p>
+    <div id="shopGrid" class="grid"></div>
+  </div>
+</div>
+
+<!-- SKINS modal -->
+<div id="skinsModal" class="modal hidden">
+  <div class="modalcard">
+    <div class="modalhead"><span>🎨 Skins</span>
+      <span class="coinpill"><span class="coinIcon">●</span> <span id="skinCoins">0</span></span>
+      <button class="x" data-close>✕</button></div>
+    <p class="modalsub">Buy a skin and equip it. Skins are cosmetic only.</p>
+    <div id="skinGrid" class="grid"></div>
+  </div>
+</div>
+
+<!-- DEATH (spectating overlay — does not block the view) -->
+<div id="deathScreen" class="hidden" style="position:fixed;inset:0;z-index:10;pointer-events:none;
+     display:flex;flex-direction:column;align-items:center;justify-content:flex-end;padding-bottom:56px;
+     background:linear-gradient(to bottom, rgba(20,18,14,0) 55%, rgba(20,18,14,.32));">
+  <div style="text-align:center;">
+    <div class="deathreason" id="deathReason" style="color:#fff;text-shadow:0 1px 6px rgba(0,0,0,.5);">eliminated</div>
+    <div id="spectateLabel" style="color:#fff;font-size:14px;text-shadow:0 1px 6px rgba(0,0,0,.5);margin-bottom:16px;">Spectating…</div>
+    <div id="respawnPrompt" style="display:inline-block;background:var(--accent);color:#fff;font-weight:700;
+         padding:12px 22px;border-radius:12px;box-shadow:0 6px 18px rgba(255,90,122,.4);letter-spacing:.04em;">
+      Press <b>SPACE</b> to respawn
+    </div>
+    <div style="margin-top:14px;">
+      <button id="deathMenuBtn" style="pointer-events:auto;background:rgba(255,255,255,.9);color:#2b2b2b;
+        border:none;border-radius:10px;padding:9px 18px;font:inherit;font-weight:700;cursor:pointer;">Main menu</button>
+    </div>
+  </div>
+</div>
+
+<!-- CHAT -->
+<button id="chatToggle" class="hidden" title="Chat">💬</button>
+<div id="chatPanel" class="hidden">
+  <div id="chatLog"></div>
+  <div id="chatInputRow">
+    <input id="chatInput" maxlength="120" placeholder="say something…" autocomplete="off" />
+    <button id="chatSend">Send</button>
+  </div>
+</div>
+
+<script>
+(() => {
+  'use strict';
+  const cv = document.getElementById('game');
+  const ctx = cv.getContext('2d');
+  let CELL_SCREEN = 14;                // px per cell (changes with zoom-out power-up)
+  const BASE_CELL = 14;
+
+  let GW = 160, GH = 160;
+  let myId = null;
+  let ws = null;
+  let connected = false;
+  let isDead = false;
+  let spectateId = null;               // entity id we're following while dead
+  let zoomOut = false;                 // set by the zoom power-up for this match
+  let selectedMode = 'classic';        // 'classic' or 'br'
+  let activeMode = 'classic';
+  let hasBoost = false;                // do I have the boost power-up this match
+  let boostMs = 10000, cooldownMs = 10000;
+  let boostState = 'idle';             // 'idle' ready, 'active', 'cooling'
+  let boostStart = 0;                  // ms timestamp of last activation
+
+  // ---- ECONOMY (browser-saved; swap to real accounts later) ----------------
+  const SHOP = [
+    {id:'boost', ic:'⚡', nm:'Speed Boost',  ds:'Tap SHIFT: 10s burst, 10s recharge.', cost:150},
+    {id:'big',   ic:'🟦', nm:'Big Mode',     ds:'Start noticeably bigger.',     cost:150},
+    {id:'zoom',  ic:'🔭', nm:'Wide View',    ds:'See more of the map.',         cost:120},
+    {id:'head',  ic:'🏰', nm:'Head Start',   ds:'Bigger starting territory.',   cost:200},
+    {id:'magnet',ic:'🧲', nm:'Coin Magnet',  ds:'+50% coins this match.',       cost:250},
+    {id:'shield',ic:'🛡️', nm:'Spawn Shield', ds:'4s of protection at spawn.',   cost:200},
+    {id:'guard', ic:'⛨', nm:'Mini Shield',  ds:'2.5s spawn protection.',       cost:120},
+    {id:'rich',  ic:'💰', nm:'Rich Start',   ds:'+100 coins when you join.',    cost:180},
+    {id:'phase', ic:'👻', nm:'Ghost Trail',  ds:'Fainter, sneakier trail.',     cost:160},
+    {id:'swift', ic:'💨', nm:'Swift Turns',  ds:'Snappier turn feel.',          cost:130},
+  ];
+  const SKINS = [
+    {id:'default', nm:'Classic',   color:null,       emoji:null,  cost:0},
+    {id:'sunset',  nm:'Sunset',    color:'#ff6b3d',  emoji:null,  cost:100},
+    {id:'ocean',   nm:'Ocean',     color:'#1f9bd1',  emoji:null,  cost:100},
+    {id:'forest',  nm:'Forest',    color:'#2e8b57',  emoji:null,  cost:100},
+    {id:'grape',   nm:'Grape',     color:'#8e44ad',  emoji:null,  cost:120},
+    {id:'gold',    nm:'Gold',      color:'#f1c40f',  emoji:null,  cost:200},
+    {id:'rose',    nm:'Rose',      color:'#ff5a7a',  emoji:null,  cost:150},
+    {id:'mint',    nm:'Mint',      color:'#1abc9c',  emoji:null,  cost:120},
+    {id:'e_fire',  nm:'Fire',      color:'#ff5a2b',  emoji:'🔥',  cost:150},
+    {id:'e_star',  nm:'Star',      color:'#ffd23f',  emoji:'⭐',  cost:150},
+    {id:'e_skull', nm:'Skull',     color:'#cfd8dc',  emoji:'💀',  cost:200},
+    {id:'e_alien', nm:'Alien',     color:'#7cf07c',  emoji:'👽',  cost:200},
+    {id:'e_ghost', nm:'Ghost',     color:'#e8eef2',  emoji:'👻',  cost:180},
+    {id:'e_heart', nm:'Heart',     color:'#ff4d6d',  emoji:'❤️',  cost:180},
+    {id:'e_crown', nm:'Crown',     color:'#f4c430',  emoji:'👑',  cost:250},
+    {id:'e_robot', nm:'Robot',     color:'#9fb3c8',  emoji:'🤖',  cost:220},
+  ];
+  const MAX_EQUIP = 3;
+
+  function loadStore(){
+    try{ return JSON.parse(localStorage.getItem('territory_save')||'{}'); }catch(_){ return {}; }
+  }
+  function saveStore(s){ try{ localStorage.setItem('territory_save', JSON.stringify(s)); }catch(_){ } }
+  let store = loadStore();
+  store.coins = store.coins ?? 300;                 // starter coins
+  store.owned = store.owned || {};                  // power-up ids owned
+  store.skins = store.skins || {default:true};      // owned skins
+  store.equip = store.equip || [];                  // equipped power-ups for next match
+  store.skin  = store.skin  || 'default';           // equipped skin
+  saveStore(store);
+
+  function addCoins(n){ store.coins += n; saveStore(store); refreshCoinUI(); }
+  function refreshCoinUI(){
+    document.getElementById('coinAmt').textContent = store.coins;
+    const sc=document.getElementById('shopCoins'); if(sc) sc.textContent=store.coins;
+    const kc=document.getElementById('skinCoins'); if(kc) kc.textContent=store.coins;
+    const lh=document.getElementById('loadoutHint');
+    if(lh) lh.textContent = store.equip.length ? ('Equipped: '+store.equip.map(id=>(SHOP.find(s=>s.id===id)||{}).nm).join(', ')) : '';
+  }
+
+  // server state (latest snapshot)
+  let owner = null, trail = null;      // Uint8Array, decoded from RLE
+  let ents = new Map();                // id -> {x,y,h,color,name,area,outside,bot,dead}
+  // smoothed render state per entity (interpolation toward server pos)
+  let view = new Map();                // id -> {x,y}
+
+  // camera (smoothed)
+  let camX = GW / 2, camY = GH / 2;
+
+  // ---- DOM ----
+  const hud = document.getElementById('hud');
+  const joinScreen = document.getElementById('joinScreen');
+  const deathScreen = document.getElementById('deathScreen');
+  const nameInput = document.getElementById('nameInput');
+  const statusEl = document.getElementById('status');
+  const myAreaEl = document.getElementById('myArea');
+  const boardRows = document.getElementById('boardRows');
+  const deathReason = document.getElementById('deathReason');
+  const spectateLabel = document.getElementById('spectateLabel');
+  const respawnPrompt = document.getElementById('respawnPrompt');
+
+  function resize(){ cv.width = innerWidth * devicePixelRatio; cv.height = innerHeight * devicePixelRatio;
+    ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0); }
+  addEventListener('resize', resize); resize();
+
+  function rleDecode(rle, len){
+    const out = new Uint8Array(len); let p = 0;
+    for (let i=0;i<rle.length;i+=2){ const v=rle[i], run=rle[i+1];
+      for (let k=0;k<run;k++) out[p++]=v; }
+    return out;
+  }
+
+  // ---- WS ----
+  let coinMult = 1;                     // raised by the magnet power-up this match
+  function connect(name){
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    ws = new WebSocket(`${proto}://${location.host}`);
+    // apply client-side power-up effects for this match
+    zoomOut = store.equip.includes('zoom');
+    CELL_SCREEN = zoomOut ? 9 : BASE_CELL;
+    coinMult = store.equip.includes('magnet') ? 1.5 : 1;
+    hasBoost = store.equip.includes('boost');
+    boostState = 'idle'; boostStart = 0;
+    activeMode = selectedMode;
+    ws.onopen = () => { connected = true; statusEl.textContent='joining…';
+      ws.send(JSON.stringify({t:'join', name, loadout: store.equip, skin: store.skin, mode: selectedMode})); };
+    ws.onclose = () => { connected = false; statusEl.textContent='disconnected — refresh to reconnect'; };
+    ws.onerror = () => { statusEl.textContent='connection error'; };
+    ws.onmessage = (ev) => {
+      const m = JSON.parse(ev.data);
+      if (m.t==='welcome'){ myId=m.id; GW=m.w; GH=m.h; activeMode=m.mode||selectedMode;
+        boostMs=m.boostMs||10000; cooldownMs=m.cooldownMs||10000;
+        hud.classList.remove('hidden'); joinScreen.classList.add('hidden'); closeModals(); statusEl.textContent='';
+        document.getElementById('chatToggle').classList.remove('hidden');
+        document.getElementById('boostWrap').classList.toggle('hidden', !hasBoost);
+        document.getElementById('boardTitle').textContent = activeMode==='br' ? 'Survivors' : 'Leaderboard';
+        document.getElementById('myStatLab').textContent = activeMode==='br' ? 'territory · 1 life' : 'your territory';
+        // rich-start power-up grants bonus coins on join
+        if (store.equip.includes('rich')){ addCoins(100); flashCoins('+100 rich start'); }
+      }
+      else if (m.t==='full'){ statusEl.textContent='world is full — try again shortly'; }
+      else if (m.t==='state'){ applyState(m); }
+      else if (m.t==='death'){ onDeath(m.reason, m.killerId, m.eliminated, m.placement); }
+      else if (m.t==='respawn'){ onRespawn(); }
+      else if (m.t==='cut'){ onCut(m.by); }
+      else if (m.t==='roundreset'){ onRoundReset(m.winner); }
+      else if (m.t==='kill'){ const c=Math.round((m.coins||20)*coinMult); addCoins(c); flashCoins('+'+c); }
+      else if (m.t==='fullmap'){ const c=Math.round((m.coins||1000)*coinMult); addCoins(c); flashCoins('+'+c+' 100%!'); }
+      else if (m.t==='chat'){ addChat(m.name, m.color, m.text); }
+    };
+  }
+
+  function applyState(m){
+    GW=m.w; GH=m.h;
+    owner = rleDecode(m.owner, GW*GH);
+    trail = rleDecode(m.trail, GW*GH);
+    const seen = new Set();
+    for (const e of m.ents){
+      seen.add(e.id);
+      ents.set(e.id, {x:e.x,y:e.y,h:e.h,color:e.c,name:e.n,area:e.a,outside:e.o,bot:e.b,dead:e.d,
+                      sz:e.sz||1,sk:e.sk||'default',bo:e.bo||0,sh:e.sh||0});
+      if (!view.has(e.id)) view.set(e.id, {x:e.x,y:e.y});
+    }
+    for (const id of [...ents.keys()]) if(!seen.has(id)){ ents.delete(id); view.delete(id); }
+    updateHud();
+    updateBoostMeter();
+    drawMinimap();
+  }
+
+  function updateHud(){
+    const total = GW*GH;
+    const list = [...ents.entries()].map(([id,e])=>({id,...e}))
+      .sort((a,b)=>b.area-a.area).slice(0,8);
+    boardRows.innerHTML = list.map((e,i)=>{
+      const pct = (e.area/total*100).toFixed(2);
+      const me = e.id===myId ? ' me':'';
+      return `<div class="row${me}"><span class="rank">${i+1}</span><span class="dot" style="background:${e.color}"></span>`+
+             `<span class="nm">${escapeHtml(e.name)}</span><span class="pct">${pct}%</span></div>`;
+    }).join('');
+    const me = ents.get(myId);
+    if (me) myAreaEl.textContent = (me.area/total*100).toFixed(2)+'%';
+  }
+  function escapeHtml(s){return (''+s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+
+  // ---- INPUT (intent only) ----
+  const KEYMAP = {ArrowUp:'N',KeyW:'N',ArrowRight:'E',KeyD:'E',ArrowDown:'S',KeyS:'S',ArrowLeft:'W',KeyA:'W'};
+  addEventListener('keydown', (e)=>{
+    // Don't steer/respawn while typing in a text field (chat box, name input).
+    const tag = (e.target && e.target.tagName) || '';
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+    // Space respawns while dead (Fortnite-style: spectate, then jump back in).
+    if (e.code==='Space' && isDead && connected && ws && ws.readyState===1){
+      ws.send(JSON.stringify({t:'respawn'})); e.preventDefault(); return;
+    }
+    // Shift activates the rechargeable boost.
+    if ((e.code==='ShiftLeft'||e.code==='ShiftRight') && hasBoost && !isDead && boostState==='idle'
+        && connected && ws && ws.readyState===1){
+      ws.send(JSON.stringify({t:'boost'})); boostState='active'; boostStart=performance.now();
+      e.preventDefault(); return;
+    }
+    if (isDead) return;                       // no steering while spectating
+    const d = KEYMAP[e.code];
+    if (d && connected && ws && ws.readyState===1){ ws.send(JSON.stringify({t:'turn', d})); e.preventDefault(); }
+  });
+  // touch swipe -> discrete turn (or tap-to-respawn while dead in classic)
+  let tsx=0,tsy=0;
+  addEventListener('touchstart',e=>{const t=e.changedTouches[0];tsx=t.clientX;tsy=t.clientY;},{passive:true});
+  addEventListener('touchend',e=>{const t=e.changedTouches[0];const dx=t.clientX-tsx,dy=t.clientY-tsy;
+    if(isDead){ if(activeMode!=='br' && connected&&ws&&ws.readyState===1) ws.send(JSON.stringify({t:'respawn'})); return; }
+    if(Math.abs(dx)<18&&Math.abs(dy)<18)return; let d;
+    if(Math.abs(dx)>Math.abs(dy)) d=dx>0?'E':'W'; else d=dy>0?'S':'N';
+    if(connected&&ws&&ws.readyState===1) ws.send(JSON.stringify({t:'turn',d}));},{passive:true});
+
+  // ---- DEATH / RESPAWN ----
+  function onDeath(reason, killerId, eliminated, placement){
+    isDead = true;
+    spectateId = (killerId && ents.has(killerId)) ? killerId : null;
+    const killer = spectateId ? ents.get(spectateId) : null;
+
+    if (eliminated){
+      // Battle royale: one life — show placement results, no respawn.
+      const br = document.getElementById('brResult');
+      document.getElementById('brPlace').textContent = '#'+(placement||'?');
+      document.getElementById('brHead').textContent = (placement===1)?'Victory Royale!':'Eliminated';
+      document.getElementById('brSub').textContent = killer ? ('Cut down by '+killer.name+'.') : 'You were cut down.';
+      br.classList.remove('hidden');
+      return;
+    }
+    const labels={cut:'cut by a rival',self:'crossed your own trail'};
+    deathReason.textContent = labels[reason]||'eliminated';
+    spectateLabel.textContent = killer ? ('Spectating '+killer.name) : 'Spectating the board';
+    deathScreen.classList.remove('hidden');
+  }
+  function onRespawn(){ isDead=false; spectateId=null; deathScreen.classList.add('hidden'); }
+
+  // Classic: got cut but kept playing with a fresh beginner plot — quick banner.
+  function onCut(by){
+    isDead=false; spectateId=null; deathScreen.classList.add('hidden');
+    flashBanner(by ? ('✂️ Cut by '+by+' — fresh start!') : '✂️ You were cut — fresh start!', '#ff7a7a');
+  }
+  // Someone hit 100% — the whole map reset.
+  function onRoundReset(winner){
+    isDead=false; spectateId=null; deathScreen.classList.add('hidden');
+    flashBanner('👑 '+(winner||'Someone')+' took the whole map! New round.', '#ffd23f');
+  }
+  // generic center banner
+  let bannerTimer=null;
+  function flashBanner(text, color){
+    let el=document.getElementById('banner');
+    if(!el){ el=document.createElement('div'); el.id='banner';
+      el.style.cssText='position:fixed;top:90px;left:50%;transform:translateX(-50%);z-index:9;'+
+        'background:rgba(20,32,28,.92);color:#fff;font-weight:800;padding:12px 24px;border-radius:14px;'+
+        'box-shadow:0 10px 30px rgba(0,0,0,.35);pointer-events:none;transition:opacity .3s;font-size:15px;';
+      document.body.appendChild(el); }
+    el.textContent=text; el.style.borderLeft='4px solid '+(color||'#ffd23f'); el.style.opacity='1';
+    clearTimeout(bannerTimer); bannerTimer=setTimeout(()=>{el.style.opacity='0';},2200);
+  }
+
+  // ---- RENDER ----
+  function lerp(a,b,t){return a+(b-a)*t;}
+
+  function draw(){
+    requestAnimationFrame(draw);
+    const W=innerWidth,H=innerHeight;
+    ctx.clearRect(0,0,W,H);
+    if(!owner){return;}
+
+    // interpolate entity render positions toward latest server pos
+    for(const [id,e] of ents){
+      const v=view.get(id); if(!v)continue;
+      v.x=lerp(v.x,e.x,0.35); v.y=lerp(v.y,e.y,0.35);
+    }
+    // camera follows me — or my killer while I'm spectating
+    const camTargetId = (isDead && spectateId!=null) ? spectateId : myId;
+    const tgt = view.get(camTargetId) || view.get(myId);
+    if(tgt){ camX=lerp(camX,tgt.x,0.12); camY=lerp(camY,tgt.y,0.12); }
+    camX=Math.max(0,Math.min(GW,camX)); camY=Math.max(0,Math.min(GH,camY));
+
+    const cs=CELL_SCREEN;
+    const ox = W/2 - camX*cs;
+    const oy = H/2 - camY*cs;
+
+    // visible cell range (cull)
+    const x0=Math.max(0,Math.floor((-ox)/cs)-1), x1=Math.min(GW-1,Math.ceil((W-ox)/cs)+1);
+    const y0=Math.max(0,Math.floor((-oy)/cs)-1), y1=Math.min(GH-1,Math.ceil((H-oy)/cs)+1);
+
+    const colorOf=(id)=>{const e=ents.get(id);return e?e.color:'#bbb';};
+    const ownerAt=(x,y)=> (x<0||y<0||x>=GW||y>=GH) ? -1 : owner[y*GW+x];
+
+    // --- paper backdrop (off-white with a faint grid like graph paper) ---
+    ctx.fillStyle='#fbf9f3';
+    ctx.fillRect(ox,oy,GW*cs,GH*cs);
+    ctx.strokeStyle='rgba(120,110,90,0.06)';ctx.lineWidth=1;
+    ctx.beginPath();
+    for(let x=x0;x<=x1+1;x++){const sx=ox+x*cs;ctx.moveTo(sx,oy+y0*cs);ctx.lineTo(sx,oy+(y1+1)*cs);}
+    for(let y=y0;y<=y1+1;y++){const sy=oy+y*cs;ctx.moveTo(ox+x0*cs,sy);ctx.lineTo(ox+(x1+1)*cs,sy);}
+    ctx.stroke();
+
+    // --- territory drop shadow pass (gives the slightly-3D "paper cutout" look)
+    // Draw every owned cell offset down-right in soft dark; the fill pass on top
+    // then sits "above" it.
+    ctx.save();
+    ctx.fillStyle='rgba(70,60,45,0.18)';
+    const sh=Math.max(2,cs*0.16);
+    for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){
+      if(owner[y*GW+x]!==0){
+        // only shadow the bottom/right exposed edges to keep it cheap and clean
+        const below=ownerAt(x,y+1), right=ownerAt(x+1,y);
+        if(below===0||right===0||below===-1||right===-1){
+          ctx.fillRect(ox+x*cs+sh, oy+y*cs+sh, cs+0.5, cs+0.5);
+        }
+      }
+    }
+    ctx.restore();
+
+    // --- territory fill pass ---
+    for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){
+      const o=owner[y*GW+x];
+      if(o!==0){ ctx.fillStyle=colorOf(o); ctx.fillRect(ox+x*cs, oy+y*cs, cs+0.6, cs+0.6); }
+    }
+    // --- top highlight: lighten the upper edge of each region for a soft bevel
+    ctx.save();
+    ctx.fillStyle='rgba(255,255,255,0.22)';
+    for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){
+      const o=owner[y*GW+x];
+      if(o!==0 && ownerAt(x,y-1)!==o){ ctx.fillRect(ox+x*cs, oy+y*cs, cs+0.6, Math.max(1.5,cs*0.2)); }
+    }
+    ctx.restore();
+
+    // --- trails: glowing rounded ribbon in the owner's color ---
+    ctx.save();
+    for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){
+      const t=trail[y*GW+x];
+      if(t!==0){
+        const c=colorOf(t);
+        ctx.fillStyle=c; ctx.globalAlpha=0.85;
+        const pad=cs*0.16;
+        roundRect(ox+x*cs+pad, oy+y*cs+pad, cs-pad*2, cs-pad*2, cs*0.28);
+        ctx.fill();
+      }
+    }
+    ctx.globalAlpha=1; ctx.restore();
+
+    // --- map border (paper edge) ---
+    ctx.strokeStyle='rgba(120,110,90,0.5)';ctx.lineWidth=3;
+    ctx.strokeRect(ox,oy,GW*cs,GH*cs);
+
+    // --- avatars: rounded square in the player's color, with a little face ---
+    for(const [id,e] of ents){
+      if(e.dead)continue;
+      const v=view.get(id); if(!v)continue;
+      const sx=ox+v.x*cs, sy=oy+v.y*cs;
+      const r=cs*0.42*(e.sz||1);
+      const bodyColor = skinColor(e.sk) || e.color;
+      const mine=id===myId, watched=(isDead&&id===spectateId);
+      // soft contact shadow
+      ctx.save();
+      ctx.fillStyle='rgba(70,60,45,0.22)';
+      roundRect(sx-r+cs*0.07, sy-r+cs*0.11, r*2, r*2, r*0.45); ctx.fill();
+      ctx.restore();
+      // BOOST glow animation (pulsing aura + speed streaks behind)
+      if(e.bo){
+        const pulse = 0.5 + 0.5*Math.sin(performance.now()/90);
+        ctx.save();
+        ctx.globalAlpha = 0.35 + 0.25*pulse;
+        ctx.fillStyle = '#46f0f0';
+        const gr = r*(1.5+0.3*pulse);
+        ctx.beginPath(); ctx.arc(sx,sy,gr,0,Math.PI*2); ctx.fill();
+        // streaks opposite heading
+        const dv={N:[0,-1],S:[0,1],E:[1,0],W:[-1,0]}[e.h]||[0,1];
+        ctx.globalAlpha=0.5; ctx.strokeStyle='#46f0f0'; ctx.lineWidth=2;
+        for(const off of [-0.4,0,0.4]){
+          ctx.beginPath();
+          ctx.moveTo(sx-dv[0]*r*1.2 + dv[1]*r*off, sy-dv[1]*r*1.2 + dv[0]*r*off);
+          ctx.lineTo(sx-dv[0]*r*2.4 + dv[1]*r*off, sy-dv[1]*r*2.4 + dv[0]*r*off);
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
+      // SHIELD ring animation
+      if(e.sh){
+        const t=performance.now()/300;
+        ctx.save();
+        ctx.globalAlpha=0.7; ctx.strokeStyle='#7fd0ff'; ctx.lineWidth=2.5;
+        ctx.setLineDash([6,5]); ctx.lineDashOffset=-t*10;
+        ctx.beginPath(); ctx.arc(sx,sy,r*1.5,0,Math.PI*2); ctx.stroke();
+        ctx.restore();
+      }
+      // body (border is a darker shade of the same color, like paper.io)
+      ctx.fillStyle=bodyColor;
+      ctx.strokeStyle = shade(bodyColor,-0.35);
+      ctx.lineWidth = (mine||watched)?3:2;
+      roundRect(sx-r,sy-r,r*2,r*2,r*0.45); ctx.fill(); ctx.stroke();
+      // highlight ring for me / spectated killer
+      if(mine||watched){
+        ctx.strokeStyle = mine ? 'rgba(255,255,255,0.9)' : '#fff';
+        ctx.lineWidth=1.5;
+        roundRect(sx-r+2,sy-r+2,r*2-4,r*2-4,r*0.4); ctx.stroke();
+      }
+      // emoji skin sits on top of the body instead of the plain face
+      const emo = skinEmoji(e.sk);
+      if(emo){
+        ctx.font = (r*1.5|0)+'px serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+        ctx.fillText(emo, sx, sy+1);
+        ctx.textBaseline='alphabetic';
+        // still draw a name tag below
+        if(mine || watched || !e.bot) drawNameTag(e, sx, sy, r, mine, watched);
+        continue;
+      }
+      // --- face: two eyes looking in the heading direction ---
+      const dirv = {N:[0,-1],S:[0,1],E:[1,0],W:[-1,0]}[e.h] || [0,1];
+      const eyeR=Math.max(1.6,r*0.22), pupR=Math.max(0.9,eyeR*0.5);
+      const eyeOff=r*0.42;                       // separation across the face
+      // perpendicular axis for placing the two eyes side by side
+      const perp=[ -dirv[1], dirv[0] ];
+      // eyes sit slightly toward the front of the face
+      const front=r*0.26;
+      for(const s of [-1,1]){
+        const ex=sx + perp[0]*eyeOff*s + dirv[0]*front;
+        const ey=sy + perp[1]*eyeOff*s + dirv[1]*front;
+        ctx.fillStyle='#fff';
+        ctx.beginPath(); ctx.arc(ex,ey,eyeR,0,Math.PI*2); ctx.fill();
+        // pupil pushed toward the heading
+        ctx.fillStyle='#222';
+        ctx.beginPath(); ctx.arc(ex+dirv[0]*eyeR*0.4, ey+dirv[1]*eyeR*0.4, pupR,0,Math.PI*2); ctx.fill();
+      }
+      // name tag (me, watched target, and all humans)
+      if(mine || watched || !e.bot){ drawNameTag(e, sx, sy, r, mine, watched); }
+    }
+  }
+  function drawNameTag(e, sx, sy, r, mine, watched){
+    const label=mine?e.name:(watched?e.name+' (killer)':e.name);
+    ctx.font='600 11px ui-monospace,monospace';ctx.textAlign='center';
+    const tw=ctx.measureText(label).width;
+    ctx.fillStyle='rgba(255,255,255,0.85)';
+    roundRect(sx-tw/2-5, sy-r-20, tw+10, 15, 5); ctx.fill();
+    ctx.fillStyle='#2b2b2b';
+    ctx.fillText(label, sx, sy-r-9);
+  }
+  // darken/lighten a hex or hsl color by amt (-1..1)
+  function shade(col, amt){
+    if(col.startsWith('hsl')){
+      const m=col.match(/hsl\((\d+),\s*(\d+)%?,\s*(\d+)%?\)/);
+      if(m){ let l=Math.max(0,Math.min(100, +m[3] + amt*100)); return `hsl(${m[1]},${m[2]}%,${l|0}%)`; }
+      return col;
+    }
+    let c=col.replace('#',''); if(c.length===3)c=c.split('').map(x=>x+x).join('');
+    let r=parseInt(c.slice(0,2),16),g=parseInt(c.slice(2,4),16),b=parseInt(c.slice(4,6),16);
+    const f=x=>Math.max(0,Math.min(255, Math.round(x + amt*255)));
+    return `rgb(${f(r)},${f(g)},${f(b)})`;
+  }
+  // helper used by render
+  function roundRect(x,y,w,h,r){
+    r=Math.min(r,w/2,h/2);
+    ctx.beginPath();
+    ctx.moveTo(x+r,y);
+    ctx.arcTo(x+w,y,x+w,y+h,r);
+    ctx.arcTo(x+w,y+h,x,y+h,r);
+    ctx.arcTo(x,y+h,x,y,r);
+    ctx.arcTo(x,y,x+w,y,r);
+    ctx.closePath();
+  }
+  requestAnimationFrame(draw);
+
+  // ---- start ----
+  document.getElementById('playBtn').onclick = ()=>{
+    const name=(nameInput.value||'Player').trim().slice(0,16)||'Player';
+    connect(name);
+  };
+  nameInput.addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('playBtn').click();});
+  nameInput.focus();
+
+  // decorative floating paper squares on the menu
+  (function makeFloaties(){
+    const wrap=document.getElementById('floaties'); if(!wrap)return;
+    const cols=['#e6194b','#3cb44b','#4363d8','#f58231','#911eb4','#1ba3a3','#f032e6','#e8762a'];
+    for(let k=0;k<8;k++){
+      const i=document.createElement('i');
+      const sz=22+Math.random()*30;
+      i.style.width=i.style.height=sz+'px';
+      i.style.background=cols[k%cols.length];
+      i.style.left=(Math.random()*100)+'%';
+      i.style.top=(Math.random()*100)+'%';
+      i.style.animationDelay=(-Math.random()*7)+'s';
+      i.style.animationDuration=(6+Math.random()*4)+'s';
+      wrap.appendChild(i);
+    }
+  })();
+
+  // ---- home button: leave the world, back to the menu ----
+  function goHome(){
+    if(ws){ try{ws.close();}catch(_){ } ws=null; }
+    connected=false; isDead=false; spectateId=null; myId=null;
+    owner=null; trail=null; ents.clear(); view.clear();
+    hud.classList.add('hidden');
+    deathScreen.classList.add('hidden');
+    document.getElementById('chatToggle').classList.add('hidden');
+    document.getElementById('chatPanel').classList.add('hidden');
+    joinScreen.classList.remove('hidden');
+    statusEl.textContent='';
+    refreshCoinUI();
+    nameInput.focus();
+  }
+  document.getElementById('homeBtn').onclick = goHome;
+  document.getElementById('deathMenuBtn').onclick = goHome;
+
+  // ---- skins helper (color override; null = use player's assigned color) ----
+  function skinColor(skId){
+    const s = SKINS.find(s=>s.id===skId);
+    return s ? s.color : null;
+  }
+  function skinEmoji(skId){
+    const s = SKINS.find(s=>s.id===skId);
+    return s ? s.emoji : null;
+  }
+
+  // ---- SHOP / SKINS ui ----
+  const shopModal=document.getElementById('shopModal');
+  const skinsModal=document.getElementById('skinsModal');
+  const howModal=document.getElementById('howModal');
+  function closeModals(){ shopModal.classList.add('hidden'); skinsModal.classList.add('hidden'); howModal.classList.add('hidden'); }
+  document.querySelectorAll('[data-close]').forEach(b=>b.onclick=closeModals);
+  [shopModal,skinsModal,howModal].forEach(m=>m.addEventListener('click',e=>{ if(e.target===m) closeModals(); }));
+
+  function renderShop(){
+    const grid=document.getElementById('shopGrid');
+    grid.innerHTML = SHOP.map(p=>{
+      const owned = !!store.owned[p.id];
+      const equipped = store.equip.includes(p.id);
+      let btn;
+      if(!owned){
+        const can = store.coins>=p.cost;
+        btn = `<button class="${can?'locked':'cant'}" data-buy="${p.id}">${can?('Buy ● '+p.cost):('Need ● '+p.cost)}</button>`;
+      } else if(equipped){
+        btn = `<button class="equipped" data-unequip="${p.id}">Equipped ✓</button>`;
+      } else {
+        const room = store.equip.length<MAX_EQUIP;
+        btn = `<button class="${room?'equip':'cant'}" data-equip="${p.id}">${room?'Equip':'Slots full'}</button>`;
+      }
+      return `<div class="item"><div class="ic">${p.ic}</div><div class="nm">${p.nm}</div>`+
+             `<div class="ds">${p.ds}</div>${btn}</div>`;
+    }).join('');
+    grid.querySelectorAll('[data-buy]').forEach(b=>b.onclick=()=>{
+      const p=SHOP.find(s=>s.id===b.dataset.buy);
+      if(store.coins>=p.cost){ store.coins-=p.cost; store.owned[p.id]=true; saveStore(store); renderShop(); refreshCoinUI(); }
+    });
+    grid.querySelectorAll('[data-equip]').forEach(b=>b.onclick=()=>{
+      if(store.equip.length<MAX_EQUIP && !store.equip.includes(b.dataset.equip)){ store.equip.push(b.dataset.equip); saveStore(store); renderShop(); refreshCoinUI(); }
+    });
+    grid.querySelectorAll('[data-unequip]').forEach(b=>b.onclick=()=>{
+      store.equip = store.equip.filter(x=>x!==b.dataset.unequip); saveStore(store); renderShop(); refreshCoinUI();
+    });
+    refreshCoinUI();
+  }
+  function renderSkins(){
+    const grid=document.getElementById('skinGrid');
+    grid.innerHTML = SKINS.map(s=>{
+      const owned = !!store.skins[s.id];
+      const equipped = store.skin===s.id;
+      const sw = `<div class="swatch" style="background:${s.color||'#bbb'}"></div>`;
+      let btn;
+      if(!owned){
+        const can = store.coins>=s.cost;
+        btn = `<button class="${can?'locked':'cant'}" data-buyskin="${s.id}">${can?('Buy ● '+s.cost):('Need ● '+s.cost)}</button>`;
+      } else if(equipped){ btn = `<button class="equipped">Equipped ✓</button>`; }
+      else { btn = `<button class="equip" data-equipskin="${s.id}">Equip</button>`; }
+      return `<div class="item">${sw}<div class="nm">${s.nm}</div><div class="ds">${s.cost?('● '+s.cost):'Free'}</div>${btn}</div>`;
+    }).join('');
+    grid.querySelectorAll('[data-buyskin]').forEach(b=>b.onclick=()=>{
+      const s=SKINS.find(x=>x.id===b.dataset.buyskin);
+      if(store.coins>=s.cost){ store.coins-=s.cost; store.skins[s.id]=true; saveStore(store); renderSkins(); refreshCoinUI(); }
+    });
+    grid.querySelectorAll('[data-equipskin]').forEach(b=>b.onclick=()=>{
+      store.skin=b.dataset.equipskin; saveStore(store); renderSkins(); refreshCoinUI();
+    });
+    refreshCoinUI();
+  }
+  document.getElementById('shopBtn').onclick=()=>{ renderShop(); shopModal.classList.remove('hidden'); };
+  document.getElementById('skinsBtn').onclick=()=>{ renderSkins(); skinsModal.classList.remove('hidden'); };
+  document.getElementById('howBtn').onclick=()=>{ howModal.classList.remove('hidden'); };
+  document.getElementById('howGotIt').onclick=closeModals;
+
+  // ---- coin flash feedback ----
+  let flashTimer=null;
+  function flashCoins(txt){
+    let el=document.getElementById('coinFlash');
+    if(!el){ el=document.createElement('div'); el.id='coinFlash';
+      el.style.cssText='position:fixed;top:60px;left:50%;transform:translateX(-50%);z-index:8;'+
+        'background:#fff7e0;border:1px solid #f0e0a8;color:#7a5b15;font-weight:800;padding:8px 16px;'+
+        'border-radius:999px;box-shadow:0 8px 20px rgba(120,110,90,.2);pointer-events:none;transition:opacity .3s;';
+      document.body.appendChild(el); }
+    el.textContent='● '+txt; el.style.opacity='1';
+    clearTimeout(flashTimer); flashTimer=setTimeout(()=>{el.style.opacity='0';},900);
+  }
+
+  // ---- chat ----
+  const chatToggle=document.getElementById('chatToggle');
+  const chatPanel=document.getElementById('chatPanel');
+  const chatLog=document.getElementById('chatLog');
+  const chatInput=document.getElementById('chatInput');
+  chatToggle.onclick=()=>{ const open=!chatPanel.classList.contains('hidden');
+    if(open){ chatPanel.classList.add('hidden'); } else { chatPanel.classList.remove('hidden'); chatToggle.classList.add('hidden'); chatInput.focus(); } };
+  function sendChat(){ const t=chatInput.value.trim(); if(t&&ws&&ws.readyState===1){ ws.send(JSON.stringify({t:'chat',text:t})); } chatInput.value=''; }
+  document.getElementById('chatSend').onclick=sendChat;
+  chatInput.addEventListener('keydown',e=>{ if(e.key==='Enter'){sendChat();e.stopPropagation();}
+    if(e.key==='Escape'){ chatPanel.classList.add('hidden'); chatToggle.classList.remove('hidden'); } });
+  // don't let chat typing steer the avatar
+  chatInput.addEventListener('keyup',e=>e.stopPropagation());
+  function addChat(name,color,text){
+    const d=document.createElement('div'); d.className='msg';
+    d.innerHTML=`<b style="color:${color}">${escapeHtml(name)}:</b> ${escapeHtml(text)}`;
+    chatLog.appendChild(d); chatLog.scrollTop=chatLog.scrollHeight;
+    while(chatLog.children.length>60) chatLog.removeChild(chatLog.firstChild);
+  }
+
+  // ---- boost meter ----
+  function updateBoostMeter(){
+    if(!hasBoost) return;
+    const fill=document.getElementById('boostFill');
+    const lab=document.getElementById('boostLabel');
+    const now=performance.now();
+    if(boostState==='active'){
+      const elapsed=now-boostStart;
+      if(elapsed>=boostMs){ boostState='cooling'; boostStart=now; }
+      else { fill.style.width=(100*(1-elapsed/boostMs))+'%'; fill.className='active'; lab.textContent='⚡ BOOSTING'; return; }
+    }
+    if(boostState==='cooling'){
+      const elapsed=now-boostStart;
+      if(elapsed>=cooldownMs){ boostState='idle'; }
+      else { fill.style.width=(100*(elapsed/cooldownMs))+'%'; fill.className=''; lab.textContent='recharging…'; return; }
+    }
+    fill.style.width='100%'; fill.className='ready'; lab.textContent='⚡ SHIFT to boost';
+  }
+
+  // ---- minimap ----
+  const mmEl=document.getElementById('minimap');
+  const mmCtx=mmEl.getContext('2d');
+  let mmReady=false;
+  function setupMinimap(){ mmEl.width=150; mmEl.height=150; mmReady=true; }
+  setupMinimap();
+  function drawMinimap(){
+    if(!mmReady||!owner) return;
+    const W=150,H=150; mmCtx.clearRect(0,0,W,H);
+    mmCtx.fillStyle='#eef3ef'; mmCtx.fillRect(0,0,W,H);
+    const sx=W/GW, sy=H/GH;
+    // territory: sample every 2nd cell for speed
+    for(let y=0;y<GH;y+=2)for(let x=0;x<GW;x+=2){
+      const o=owner[y*GW+x];
+      if(o!==0){ const e=ents.get(o); mmCtx.fillStyle=(e?e.color:'#bbb'); mmCtx.fillRect(x*sx,y*sy,sx*2,sy*2); }
+    }
+    // players as dots
+    for(const [id,e] of ents){ if(e.dead)continue;
+      mmCtx.fillStyle = id===myId ? '#111' : (e.bot?'#fff':'#222');
+      const px=e.x*sx, py=e.y*sy;
+      mmCtx.beginPath(); mmCtx.arc(px,py, id===myId?3:2, 0,Math.PI*2); mmCtx.fill();
+      if(id===myId){ mmCtx.strokeStyle='#111'; mmCtx.lineWidth=1; mmCtx.beginPath(); mmCtx.arc(px,py,4,0,Math.PI*2); mmCtx.stroke(); }
+    }
+    mmCtx.strokeStyle='rgba(120,110,90,.4)'; mmCtx.lineWidth=2; mmCtx.strokeRect(1,1,W-2,H-2);
+  }
+
+  // ---- mode picker ----
+  document.querySelectorAll('.modeopt').forEach(b=>b.onclick=()=>{
+    document.querySelectorAll('.modeopt').forEach(x=>x.classList.remove('active'));
+    b.classList.add('active'); selectedMode=b.dataset.mode;
+  });
+
+  // ---- battle-royale results menu ----
+  document.getElementById('brMenuBtn').onclick=()=>{ document.getElementById('brResult').classList.add('hidden'); goHome(); };
+
+  // ---- animated menu background: weaving "snakes" leaving trails ----
+  (function menuFx(){
+    const c=document.getElementById('menuFx'); if(!c) return;
+    const cx=c.getContext('2d');
+    let W,H; function fit(){ W=c.width=innerWidth; H=c.height=innerHeight; }
+    fit(); addEventListener('resize',fit);
+    const COLORS=['#e6194b','#3cb44b','#4363d8','#f58231','#46f0f0','#f032e6','#ffd23f','#1abc9c'];
+    const snakes=[];
+    for(let i=0;i<8;i++){
+      snakes.push({ x:Math.random()*W, y:Math.random()*H,
+        dir:(Math.random()*4|0), col:COLORS[i%COLORS.length], seg:[], turnIn:20+Math.random()*40 });
+    }
+    const DIRV=[[0,-1],[1,0],[0,1],[-1,0]];
+    let raf;
+    function step(){
+      // only animate while the menu is visible
+      if(joinScreen.classList.contains('hidden')){ raf=requestAnimationFrame(step); return; }
+      cx.clearRect(0,0,W,H);
+      for(const s of snakes){
+        s.turnIn--;
+        if(s.turnIn<=0){ s.dir=(s.dir + (Math.random()<.5?1:3))%4; s.turnIn=20+Math.random()*50; }
+        const v=DIRV[s.dir]; s.x+=v[0]*2.4; s.y+=v[1]*2.4;
+        if(s.x<-20)s.x=W+20; if(s.x>W+20)s.x=-20; if(s.y<-20)s.y=H+20; if(s.y>H+20)s.y=-20;
+        s.seg.push([s.x,s.y]); if(s.seg.length>46) s.seg.shift();
+        // trail
+        cx.lineCap='round'; cx.lineJoin='round';
+        for(let i=1;i<s.seg.length;i++){
+          cx.globalAlpha=(i/s.seg.length)*0.5;
+          cx.strokeStyle=s.col; cx.lineWidth=8;
+          cx.beginPath(); cx.moveTo(s.seg[i-1][0],s.seg[i-1][1]); cx.lineTo(s.seg[i][0],s.seg[i][1]); cx.stroke();
+        }
+        // head
+        cx.globalAlpha=0.9; cx.fillStyle=s.col;
+        const r=7; cx.beginPath();
+        cx.roundRect ? cx.roundRect(s.x-r,s.y-r,r*2,r*2,4) : cx.rect(s.x-r,s.y-r,r*2,r*2);
+        cx.fill();
+      }
+      cx.globalAlpha=1;
+      raf=requestAnimationFrame(step);
+    }
+    step();
+  })();
+
+  refreshCoinUI();
+})();
+</script>
+</body>
+</html>
