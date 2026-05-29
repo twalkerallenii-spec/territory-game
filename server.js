@@ -13,8 +13,11 @@ const { WebSocketServer } = require('ws');
 // ---- TUNABLE KNOBS (Blueprint Sec 19 — illustrative defaults) --------------
 const GRID_W = 160;
 const GRID_H = 160;
-const TICK_RATE = 15;                 // sim ticks per second
-const CELLS_PER_SEC = 8;              // avatar speed
+const TICK_RATE = 20;                 // sim ticks per second (was 15 — smoother)
+const CELLS_PER_SEC = 13;             // base avatar speed (was 8 — faster game)
+const BOOST_MULT = 1.7;               // active speed-boost multiplier
+const BOOST_DURATION_MS = 10000;      // boost lasts 10s
+const BOOST_COOLDOWN_MS = 10000;      // then 10s to recharge
 const ROOM_CAP = 28;                  // max entities (humans + bots)
 const MIN_BOTS = 12;                  // competitive AI field
 const SPAWN_BLOB = 3;                 // half-size of starting square (3 => 7x7)
@@ -137,24 +140,33 @@ function nextBotName() {
 
 // Power-up effects the server enforces. Loadout comes from the client on join;
 // validated against this whitelist so a hacked client can't invent effects.
+// 'boost' is the rechargeable active speed boost (tap to use). Others are passive.
 const POWERUPS = {
-  speed:  { speedMult: 1.8 },     // 2x-ish faster
-  big:    { sizeMult: 1.8 },      // bigger character (visual + hitbox-neutral)
+  boost:  { hasBoost: true },     // tap to go fast 10s, 10s cooldown
+  big:    { sizeMult: 1.7 },      // bigger character
   zoom:   { zoomOut: true },      // client renders a wider view
-  head:   { startBlob: 5 },       // bigger starting territory (7x7 -> 11x11)
-  // remaining ids are client-cosmetic or reserved; server ignores unknowns
+  head:   { startBlob: 5 },       // bigger starting territory
+  magnet: { coinMult: 1.5 },      // client-side coin bonus
+  shield: { shieldMs: 4000 },     // spawn protection (server-enforced)
+  phase:  { phaseTrail: true },   // your trail is slightly shorter-lived (cosmetic-ish)
+  rich:   { startCoins: true },   // client grants bonus coins on join
+  swift:  { turnPrio: true },     // queue turns a touch earlier (handled client/animation)
+  guard:  { shieldMs: 2500 },     // shorter shield variant
 };
 
-function spawnEntity({ isBot, name, loadout }) {
+function spawnEntity({ isBot, name, loadout, mode }) {
   const id = nextId++;
   // Bigger starting blob if the "head start" power-up is equipped.
   const lo = sanitizeLoadout(loadout);
   const blob = lo.includes('head') ? POWERUPS.head.startBlob : SPAWN_BLOB;
   const { cx, cy } = findSpawn(id, blob);
+  const shieldMs = lo.includes('shield') ? POWERUPS.shield.shieldMs
+                 : lo.includes('guard') ? POWERUPS.guard.shieldMs : 0;
   const e = {
     id, isBot, name: name || (isBot ? nextBotName() : 'Player ' + id),
     color: freeColor(),
     cx, cy, blob,
+    mode: mode === 'br' ? 'br' : 'classic',
     px: cx + 0.5, py: cy + 0.5,        // continuous position (Blueprint Sec 1)
     heading: headingTowardCenter(cx, cy),
     pendingTurn: null,
@@ -162,12 +174,19 @@ function spawnEntity({ isBot, name, loadout }) {
     trailCells: [],
     area: 0,
     dead: false,
+    eliminated: false,                 // battle-royale: out for good
     respawnAt: 0,
     killerId: 0,
     kills: 0,
     loadout: lo,
-    speedMult: lo.includes('speed') ? POWERUPS.speed.speedMult : 1,
     sizeMult: lo.includes('big') ? POWERUPS.big.sizeMult : 1,
+    // rechargeable boost state
+    hasBoost: lo.includes('boost'),
+    boosting: false,
+    boostUntil: 0,
+    boostReadyAt: 0,
+    // spawn shield
+    shieldUntil: shieldMs ? Date.now() + shieldMs : 0,
     // bot personality (varies behavior so 12 AI don't act identically)
     botAggro: isBot ? 0.3 + Math.random() * 0.6 : 0,   // willingness to hunt trails
     botGreed: isBot ? 12 + Math.random() * 28 : 0,      // trail length before retreating
@@ -218,9 +237,16 @@ function recomputeArea(e) {
 // (e.g. wall death or self-cut with no aggressor).
 function killEntity(e, reason, killer) {
   if (e.dead) return;
+  // Spawn shield: ignore lethal hits while active (but the shield doesn't make
+  // YOU lethal to others — it just protects you).
+  if (e.shieldUntil && Date.now() < e.shieldUntil && reason !== 'self') return;
+
   e.dead = true;
+  // Battle-royale: one life. Mark eliminated so the player can't respawn.
+  if (e.mode === 'br') e.eliminated = true;
   e.respawnAt = Date.now() + (e.isBot ? BOT_RESPAWN_MS : PLAYER_MIN_DEAD_MS);
   e.killerId = (killer && killer.id !== e.id) ? killer.id : 0;
+  e.boosting = false;
 
   clearTrail(e);
   if (killer && killer.id !== e.id && !killer.dead) {
@@ -236,8 +262,17 @@ function killEntity(e, reason, killer) {
   e.area = 0;
 
   if (e.ws && e.ws.readyState === 1) {
-    send(e.ws, { t: 'death', reason, killerId: e.killerId });
+    send(e.ws, { t: 'death', reason, killerId: e.killerId, eliminated: e.eliminated || false,
+                 placement: e.eliminated ? brPlacement() : 0 });
   }
+}
+
+// Battle-royale: how many BR entities are still alive (your placement = that +1
+// since you just died). Used to show "You placed #N".
+function brPlacement() {
+  let aliveBr = 0;
+  for (const e of entities.values()) if (e.mode === 'br' && !e.dead && !e.eliminated) aliveBr++;
+  return aliveBr + 1;
 }
 
 // ---- CAPTURE: inverse flood fill (Blueprint Sec 2A) ------------------------
@@ -367,8 +402,9 @@ function enterCell(e, x, y) {
 function advance(e) {
   if (e.dead) return;
 
-  // distance to travel this tick, in cells
-  let remaining = CELL_PER_TICK * (e.speedMult || 1);
+  // distance to travel this tick, in cells (boost applies while active)
+  const mult = e.boosting ? BOOST_MULT : 1;
+  let remaining = CELL_PER_TICK * mult;
   // fractional position within the current cell, measured along heading
   e._frac = (e._frac || 0);
 
@@ -533,6 +569,8 @@ function respawnEntity(e) {
   e.heading = headingTowardCenter(cx, cy);
   e.pendingTurn = null; e.isOutside = false; e.trailCells.length = 0;
   e.dead = false; e.killerId = 0; e._gotFullMap = false; e._frac = 0;
+  e.boosting = false; e.boostUntil = 0; e.boostReadyAt = 0;
+  e.shieldUntil = 0;  // no re-shield on manual respawn (shield is a fresh-spawn perk)
   paintSpawnBlob(e); recomputeArea(e);
   if (e.ws && e.ws.readyState === 1) send(e.ws, { t: 'respawn', id: e.id });
 }
@@ -540,17 +578,26 @@ function respawnEntity(e) {
 function tick() {
   const now = Date.now();
 
-  // Auto-respawn applies ONLY to bots (after their 1-minute delay). Human
-  // players stay dead — spectating their killer — until they press Space,
-  // which is handled in the WS 'respawn' message.
+  // Boost lifecycle: end an active boost when its window closes.
   for (const e of entities.values()) {
-    if (e.dead && e.isBot && now >= e.respawnAt) {
-      if (entities.size > ROOM_CAP) { entities.delete(e.id); continue; }
-      respawnEntity(e);
+    if (e.boosting && now >= e.boostUntil) {
+      e.boosting = false;
+      e.boostReadyAt = now + BOOST_COOLDOWN_MS;
     }
   }
 
-  for (const e of entities.values()) if (e.isBot) botThink(e);
+  // Auto-respawn applies ONLY to bots (after their delay) and NOT to eliminated
+  // battle-royale entities. Humans respawn on Space (classic only).
+  for (const e of entities.values()) {
+    if (e.dead && e.isBot && !e.eliminated && now >= e.respawnAt) {
+      if (entities.size > ROOM_CAP) { entities.delete(e.id); continue; }
+      respawnEntity(e);
+    }
+    // remove eliminated bots so the world stays populated with fresh ones
+    if (e.dead && e.isBot && e.eliminated && now >= e.respawnAt) { entities.delete(e.id); }
+  }
+
+  for (const e of entities.values()) if (e.isBot && !e.dead) botThink(e);
   for (const e of entities.values()) advance(e);
 
   maintainBots();
@@ -580,6 +627,7 @@ function broadcastState() {
       x: +e.px.toFixed(2), y: +e.py.toFixed(2), h: e.heading,
       o: e.isOutside ? 1 : 0, a: e.area, d: e.dead ? 1 : 0,
       k: e.killerId || 0, sz: e.sizeMult || 1, sk: e.skin || 'default',
+      bo: e.boosting ? 1 : 0, sh: (e.shieldUntil && Date.now() < e.shieldUntil) ? 1 : 0,
     });
   }
   const msg = JSON.stringify({
@@ -610,6 +658,35 @@ const server = http.createServer((req, res) => {
   });
 });
 
+// Bot chat banter: if a player's message names a live bot, that bot fires back
+// one of 10 lines (a playful/mean mix), after a short human-like delay.
+const BOT_COMEBACKS = [
+  (n)=>`Cute. Keep talking, ${n||'champ'}, it won't save your territory.`,
+  ()=>`lol who let this one into the lobby`,
+  (n)=>`I'd reply but I'm busy taking your land, ${n||'pal'}.`,
+  ()=>`Big words for someone about to get cut.`,
+  ()=>`Aww, you typed that with both thumbs?`,
+  ()=>`Touch grass. Then touch my trail. See what happens.`,
+  (n)=>`${n||'You'} talk a lot for a tiny little square.`,
+  ()=>`I've eaten players ranked higher than you for breakfast.`,
+  ()=>`That's adorable. Anyway — back to winning.`,
+  ()=>`Say less. Actually, say nothing. You're embarrassing yourself.`,
+];
+function maybeBotReply(text) {
+  const lower = text.toLowerCase();
+  const named = [...entities.values()].find(e =>
+    e.isBot && !e.dead && lower.includes(e.name.toLowerCase()));
+  if (!named) return;
+  const line = BOT_COMEBACKS[(Math.random() * BOT_COMEBACKS.length) | 0];
+  const senderName = (lower.match(/\b\w+\b/) || [''])[0];  // rough; not used heavily
+  setTimeout(() => {
+    if (named.dead) return;
+    const out = JSON.stringify({ t: 'chat', name: named.name, color: named.color,
+      text: line(undefined) });
+    for (const e of entities.values()) if (e.ws && e.ws.readyState === 1) e.ws.send(out);
+  }, 700 + Math.random() * 1200);
+}
+
 const wss = new WebSocketServer({ server });
 wss.on('connection', (ws) => {
   if ([...entities.values()].filter(e => !e.isBot).length + 1 > ROOM_CAP) {
@@ -625,19 +702,28 @@ wss.on('connection', (ws) => {
 
     if (m.t === 'join') {
       const name = ('' + (m.name || 'Player')).slice(0, 16) || 'Player';
-      player = spawnEntity({ isBot: false, name, loadout: m.loadout });
+      player = spawnEntity({ isBot: false, name, loadout: m.loadout, mode: m.mode });
       player.ws = ws;
       player.skin = (typeof m.skin === 'string') ? m.skin.slice(0, 24) : 'default';
-      send(ws, { t: 'welcome', id: player.id, w: GRID_W, h: GRID_H, loadout: player.loadout });
+      send(ws, { t: 'welcome', id: player.id, w: GRID_W, h: GRID_H, loadout: player.loadout,
+                 boostMs: BOOST_DURATION_MS, cooldownMs: BOOST_COOLDOWN_MS, mode: player.mode });
     } else if (m.t === 'turn' && player && !player.dead) {
       if (['N', 'E', 'S', 'W'].includes(m.d)) player.pendingTurn = m.d;  // intent only
+    } else if (m.t === 'boost' && player && !player.dead && player.hasBoost) {
+      const now = Date.now();
+      if (!player.boosting && now >= player.boostReadyAt) {
+        player.boosting = true;
+        player.boostUntil = now + BOOST_DURATION_MS;
+      }
     } else if (m.t === 'respawn' && player && player.dead) {
-      respawnEntity(player);                         // Space-bar respawn (instant)
+      // Battle-royale: no respawn once eliminated.
+      if (!player.eliminated) respawnEntity(player);
     } else if (m.t === 'chat' && player) {
       const text = ('' + (m.text || '')).slice(0, 120).trim();
       if (text) {
         const out = JSON.stringify({ t: 'chat', name: player.name, color: player.color, text });
         for (const e of entities.values()) if (e.ws && e.ws.readyState === 1) e.ws.send(out);
+        maybeBotReply(text);   // bots clap back if their name is mentioned
       }
     }
   });
