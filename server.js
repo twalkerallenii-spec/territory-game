@@ -15,21 +15,23 @@ const GRID_W = 160;
 const GRID_H = 160;
 const TICK_RATE = 15;                 // sim ticks per second
 const CELLS_PER_SEC = 8;              // avatar speed
-const ROOM_CAP = 24;                  // max entities (humans + bots)
-const MIN_BOTS = 6;                   // keep world populated
+const ROOM_CAP = 28;                  // max entities (humans + bots)
+const MIN_BOTS = 12;                  // competitive AI field
 const SPAWN_BLOB = 3;                 // half-size of starting square (3 => 7x7)
 const SPAWN_SAFE_RADIUS = 14;         // min cells to nearest enemy avatar/trail
-const RESPAWN_DELAY_MS = 1500;
+const BOT_RESPAWN_MS = 60000;         // bots stay dead 1 minute, then auto-respawn
+const PLAYER_MIN_DEAD_MS = 0;         // humans respawn instantly on Space press
 const PORT = process.env.PORT || 3000;
 
 const CELL_PER_TICK = CELLS_PER_SEC / TICK_RATE;
 
-// Distinct, readable colors for up to ROOM_CAP entities.
+// Distinct, saturated colors that read clearly on a white paper background.
 const PALETTE = [
-  '#e6194b', '#3cb44b', '#4363d8', '#f58231', '#911eb4', '#46f0f0',
-  '#f032e6', '#bcf60c', '#fabebe', '#008080', '#e6beff', '#9a6324',
-  '#fffac8', '#800000', '#aaffc3', '#808000', '#ffd8b1', '#000075',
-  '#a9a9a9', '#ff6f61', '#6b5b95', '#88b04b', '#92a8d1', '#955251',
+  '#e6194b', '#3cb44b', '#4363d8', '#f58231', '#911eb4', '#1ba3a3',
+  '#f032e6', '#9bb800', '#e8762a', '#008080', '#a05bd6', '#9a6324',
+  '#c79a00', '#d11141', '#2a9d4a', '#5a6e00', '#c2691f', '#000075',
+  '#6b5b95', '#88154b', '#1f7a8c', '#b03a2e', '#2874a6', '#7d3c98',
+  '#cb4335', '#117864', '#b9770e', '#4a235a',
 ];
 
 // ---- WORLD STATE -----------------------------------------------------------
@@ -107,6 +109,11 @@ function spawnEntity({ isBot, name }) {
     area: 0,
     dead: false,
     respawnAt: 0,
+    killerId: 0,
+    // bot personality (varies behavior so 12 AI don't act identically)
+    botAggro: isBot ? 0.3 + Math.random() * 0.6 : 0,   // willingness to hunt trails
+    botGreed: isBot ? 12 + Math.random() * 28 : 0,      // trail length before retreating
+    botTarget: null,
     ws: null,
   };
   entities.set(id, e);
@@ -115,14 +122,24 @@ function spawnEntity({ isBot, name }) {
   return e;
 }
 
-function clearEntityFromGrid(e) {
-  // Release territory to neutral + clear active trail (Blueprint Sec 3B).
-  for (let i = 0; i < owner.length; i++) {
-    if (owner[i] === e.id) owner[i] = 0;
-    if (trail[i] === e.id) trail[i] = 0;
-  }
+function clearTrail(e) {
+  // Remove only the active trail (used when transferring territory to a killer,
+  // since the dead player's trail should never persist).
+  for (const i of e.trailCells) if (trail[i] === e.id) trail[i] = 0;
+  // Defensive sweep in case trailCells drifted from the grid.
+  for (let i = 0; i < trail.length; i++) if (trail[i] === e.id) trail[i] = 0;
   e.trailCells.length = 0;
   e.isOutside = false;
+}
+
+function releaseTerritory(e) {
+  // Send all owned land back to neutral.
+  for (let i = 0; i < owner.length; i++) if (owner[i] === e.id) owner[i] = 0;
+}
+
+function transferTerritory(fromId, toId) {
+  // Killer absorbs the victim's land (Blueprint Sec 3B [CHOICE]: awarded to killer).
+  for (let i = 0; i < owner.length; i++) if (owner[i] === fromId) owner[i] = toId;
 }
 
 function recomputeArea(e) {
@@ -132,14 +149,26 @@ function recomputeArea(e) {
 }
 
 // ---- DEATH (Blueprint Sec 3B) ----------------------------------------------
-function killEntity(e, reason) {
+// killer (optional): the entity whose trail/head caused the death. If present,
+// the victim's territory is awarded to the killer; otherwise released to neutral
+// (e.g. wall death or self-cut with no aggressor).
+function killEntity(e, reason, killer) {
   if (e.dead) return;
   e.dead = true;
-  e.respawnAt = Date.now() + RESPAWN_DELAY_MS;
-  clearEntityFromGrid(e);
+  e.respawnAt = Date.now() + (e.isBot ? BOT_RESPAWN_MS : PLAYER_MIN_DEAD_MS);
+  e.killerId = (killer && killer.id !== e.id) ? killer.id : 0;
+
+  clearTrail(e);
+  if (killer && killer.id !== e.id && !killer.dead) {
+    transferTerritory(e.id, killer.id);
+    recomputeArea(killer);
+  } else {
+    releaseTerritory(e);
+  }
   e.area = 0;
+
   if (e.ws && e.ws.readyState === 1) {
-    send(e.ws, { t: 'death', reason });
+    send(e.ws, { t: 'death', reason, killerId: e.killerId });
   }
 }
 
@@ -232,7 +261,13 @@ function enterCell(e, x, y) {
   const tOwner = trail[i];
   if (tOwner !== 0) {
     const victim = entities.get(tOwner);
-    if (victim) killEntity(victim, victim.id === e.id ? 'self' : 'cut');
+    if (victim) {
+      if (victim.id === e.id) {
+        killEntity(victim, 'self');          // self-cut: territory to neutral
+      } else {
+        killEntity(victim, 'cut', e);        // e is the killer -> takes their land
+      }
+    }
     if (e.dead) return;  // self-cut: we just died
   }
 
@@ -276,33 +311,104 @@ function advance(e) {
   }
 }
 
-// ---- BOT BRAIN (Blueprint Sec 1/Phase 1 FSM, lightweight) ------------------
+// ---- BOT BRAIN — competitive FSM (plays like a real player) ----------------
+// States, in priority order each tick:
+//   SURVIVE : something lethal is one step ahead -> turn away.
+//   HUNT    : an enemy's active trail is close and we're aggressive -> chase the
+//             cell to cut them (steals their whole territory on the kill).
+//   RETREAT : our exposed trail is longer than our greed tolerance -> head home
+//             to bank the capture before someone cuts us.
+//   EXPAND  : default -> push into neutral/enemy land to enclose new area.
+function cellSafeForBot(e, x, y) {
+  if (!inBounds(x, y)) return false;
+  const i = idx(x, y);
+  if (trail[i] === e.id) return false;          // our own trail = death
+  return true;
+}
+
+function nearestEnemyTrailDir(e, range) {
+  // Scan a small box around the bot for an enemy trail cell; return the cardinal
+  // direction that steps toward the closest one (Manhattan).
+  let best = Infinity, bestDir = null;
+  for (let dy = -range; dy <= range; dy++) {
+    for (let dx = -range; dx <= range; dx++) {
+      const x = e.cx + dx, y = e.cy + dy;
+      if (!inBounds(x, y)) continue;
+      const t = trail[idx(x, y)];
+      if (t !== 0 && t !== e.id) {
+        const d = Math.abs(dx) + Math.abs(dy);
+        if (d > 0 && d < best) {
+          best = d;
+          bestDir = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'E' : 'W') : (dy > 0 ? 'S' : 'N');
+        }
+      }
+    }
+  }
+  return bestDir;
+}
+
+function dirTowardOwnLand(e) {
+  // Pick a legal turn that steps onto (or toward) our own territory.
+  const cands = ['N', 'E', 'S', 'W'].filter(d => d !== OPP[e.heading]);
+  // first preference: a neighbor cell that is already ours
+  for (const d of cands) {
+    const [tx, ty] = DIRS[d];
+    const nx = e.cx + tx, ny = e.cy + ty;
+    if (cellSafeForBot(e, nx, ny) && inBounds(nx, ny) && owner[idx(nx, ny)] === e.id) return d;
+  }
+  // otherwise: head toward our territory's centroid
+  let sx = 0, sy = 0, n = 0;
+  for (let i = 0; i < owner.length; i++) if (owner[i] === e.id) { sx += i % GRID_W; sy += (i / GRID_W) | 0; n++; }
+  if (n > 0) {
+    const cx = sx / n, cy = sy / n;
+    const ddx = cx - e.cx, ddy = cy - e.cy;
+    const want = Math.abs(ddx) > Math.abs(ddy) ? (ddx > 0 ? 'E' : 'W') : (ddy > 0 ? 'S' : 'N');
+    const [tx, ty] = DIRS[want];
+    if (want !== OPP[e.heading] && cellSafeForBot(e, e.cx + tx, e.cy + ty)) return want;
+  }
+  return null;
+}
+
 function botThink(e) {
   if (e.dead) return;
   const [dx, dy] = DIRS[e.heading];
-  const ahead = [e.cx + dx, e.cy + dy];
-
-  // Retreat as exposure grows (Blueprint Sec 19 threatExposure).
+  const ax = e.cx + dx, ay = e.cy + dy;
   const exposure = e.trailCells.length;
-  const wantHome = exposure > 18 + Math.random() * 20;
 
-  const dangerAhead =
-    !inBounds(ahead[0], ahead[1]) ||
-    trail[idx(Math.max(0, Math.min(GRID_W - 1, ahead[0])),
-              Math.max(0, Math.min(GRID_H - 1, ahead[1])))] === e.id;
+  // helper: choose any safe legal turn (not reverse, not into own trail/wall)
+  const safeTurn = () => {
+    const opts = ['N', 'E', 'S', 'W']
+      .filter(d => d !== OPP[e.heading])
+      .filter(d => { const [tx, ty] = DIRS[d]; return cellSafeForBot(e, e.cx + tx, e.cy + ty); });
+    return opts.length ? opts[(Math.random() * opts.length) | 0] : null;
+  };
 
-  if (dangerAhead || (wantHome && Math.random() < 0.25) || Math.random() < 0.05) {
-    const opts = ['N', 'E', 'S', 'W'].filter(d => d !== OPP[e.heading] && d !== e.heading);
-    // bias toward owned territory when wanting home
-    if (wantHome) {
-      opts.sort(() => Math.random() - 0.5);
-      for (const d of opts) {
-        const [tx, ty] = DIRS[d];
-        const nx = e.cx + tx, ny = e.cy + ty;
-        if (inBounds(nx, ny) && owner[idx(nx, ny)] === e.id) { e.pendingTurn = d; return; }
-      }
+  // SURVIVE — lethal cell directly ahead
+  if (!cellSafeForBot(e, ax, ay)) {
+    const t = safeTurn();
+    if (t) e.pendingTurn = t;
+    return;
+  }
+
+  // HUNT — chase a nearby enemy trail if this bot is aggressive and not over-extended
+  if (exposure < e.botGreed * 1.3 && Math.random() < e.botAggro * 0.5) {
+    const hd = nearestEnemyTrailDir(e, 9);
+    if (hd && hd !== OPP[e.heading]) {
+      const [tx, ty] = DIRS[hd];
+      if (cellSafeForBot(e, e.cx + tx, e.cy + ty)) { e.pendingTurn = hd; return; }
     }
-    e.pendingTurn = opts[Math.floor(Math.random() * opts.length)];
+  }
+
+  // RETREAT — bank the capture before the trail gets too long
+  if (exposure > e.botGreed) {
+    const home = dirTowardOwnLand(e);
+    if (home) { e.pendingTurn = home; return; }
+  }
+
+  // EXPAND — wander outward to enclose new area; occasional turn keeps loops closing
+  if (Math.random() < 0.12) {
+    const t = safeTurn();
+    if (t) e.pendingTurn = t;
   }
 }
 
@@ -317,20 +423,26 @@ function maintainBots() {
   }
 }
 
+function respawnEntity(e) {
+  const { cx, cy } = findSpawn(e.id);
+  e.cx = cx; e.cy = cy; e.px = cx + 0.5; e.py = cy + 0.5;
+  e.heading = headingTowardCenter(cx, cy);
+  e.pendingTurn = null; e.isOutside = false; e.trailCells.length = 0;
+  e.dead = false; e.killerId = 0;
+  paintSpawnBlob(e); recomputeArea(e);
+  if (e.ws && e.ws.readyState === 1) send(e.ws, { t: 'respawn', id: e.id });
+}
+
 function tick() {
   const now = Date.now();
 
-  // respawns
+  // Auto-respawn applies ONLY to bots (after their 1-minute delay). Human
+  // players stay dead — spectating their killer — until they press Space,
+  // which is handled in the WS 'respawn' message.
   for (const e of entities.values()) {
-    if (e.dead && now >= e.respawnAt) {
-      if (e.isBot && entities.size > ROOM_CAP) { entities.delete(e.id); continue; }
-      const { cx, cy } = findSpawn(e.id);
-      e.cx = cx; e.cy = cy; e.px = cx + 0.5; e.py = cy + 0.5;
-      e.heading = headingTowardCenter(cx, cy);
-      e.pendingTurn = null; e.isOutside = false; e.trailCells.length = 0;
-      e.dead = false;
-      paintSpawnBlob(e); recomputeArea(e);
-      if (e.ws && e.ws.readyState === 1) send(e.ws, { t: 'respawn', id: e.id });
+    if (e.dead && e.isBot && now >= e.respawnAt) {
+      if (entities.size > ROOM_CAP) { entities.delete(e.id); continue; }
+      respawnEntity(e);
     }
   }
 
@@ -363,6 +475,7 @@ function broadcastState() {
       id: e.id, n: e.name, c: e.color, b: e.isBot ? 1 : 0,
       x: +e.px.toFixed(2), y: +e.py.toFixed(2), h: e.heading,
       o: e.isOutside ? 1 : 0, a: e.area, d: e.dead ? 1 : 0,
+      k: e.killerId || 0,
     });
   }
   const msg = JSON.stringify({
@@ -413,11 +526,14 @@ wss.on('connection', (ws) => {
       send(ws, { t: 'welcome', id: player.id, w: GRID_W, h: GRID_H });
     } else if (m.t === 'turn' && player && !player.dead) {
       if (['N', 'E', 'S', 'W'].includes(m.d)) player.pendingTurn = m.d;  // intent only
+    } else if (m.t === 'respawn' && player && player.dead) {
+      // Space-bar respawn: instant for human players.
+      respawnEntity(player);
     }
   });
 
   ws.on('close', () => {
-    if (player) { clearEntityFromGrid(player); entities.delete(player.id); }
+    if (player) { clearTrail(player); releaseTerritory(player); entities.delete(player.id); }
   });
 });
 

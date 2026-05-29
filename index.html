@@ -6,8 +6,8 @@
 <title>Territory — paper.io-class</title>
 <style>
   :root{
-    --bg:#0e1116; --panel:#161b24; --line:#222b38; --ink:#e7edf5; --muted:#7e8a9c;
-    --accent:#5ee0c0;
+    --bg:#f4f1ea; --panel:#ffffff; --line:#e3ddd0; --ink:#2b2b2b; --muted:#8a8275;
+    --accent:#ff5a7a;
   }
   *{box-sizing:border-box;}
   html,body{margin:0;height:100%;background:var(--bg);overflow:hidden;
@@ -17,8 +17,8 @@
 
   /* HUD */
   #hud{position:fixed;inset:0;pointer-events:none;}
-  .card{background:rgba(22,27,36,.82);border:1px solid var(--line);border-radius:14px;
-    backdrop-filter:blur(8px);}
+  .card{background:rgba(255,255,255,.86);border:1px solid var(--line);border-radius:14px;
+    backdrop-filter:blur(8px);box-shadow:0 6px 22px rgba(120,110,90,.12);}
   #board{position:absolute;top:14px;right:14px;width:230px;padding:12px 14px;}
   #board h2{margin:0 0 10px;font-size:11px;letter-spacing:.18em;text-transform:uppercase;
     color:var(--muted);font-weight:600;}
@@ -37,21 +37,21 @@
 
   /* overlays */
   .screen{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
-    background:radial-gradient(120% 120% at 50% 30%, #131a26 0%, #0b0e13 70%);z-index:10;}
+    background:radial-gradient(120% 120% at 50% 30%, #fbf9f4 0%, #ece7dc 70%);z-index:10;}
   .screen .inner{width:min(440px,90vw);padding:34px 32px;text-align:center;}
   .title{font-size:13px;letter-spacing:.42em;text-transform:uppercase;color:var(--accent);}
-  .head{font-size:40px;margin:10px 0 4px;font-weight:800;letter-spacing:-.01em;}
+  .head{font-size:40px;margin:10px 0 4px;font-weight:800;letter-spacing:-.01em;color:var(--ink);}
   .sub{color:var(--muted);font-size:13px;margin-bottom:24px;line-height:1.6;}
   input{width:100%;padding:13px 14px;border-radius:10px;border:1px solid var(--line);
-    background:#0c1017;color:var(--ink);font:inherit;font-size:15px;text-align:center;margin-bottom:14px;}
+    background:#fff;color:var(--ink);font:inherit;font-size:15px;text-align:center;margin-bottom:14px;}
   input:focus{outline:none;border-color:var(--accent);}
   button{width:100%;padding:13px;border:none;border-radius:10px;background:var(--accent);
-    color:#062018;font:inherit;font-weight:700;font-size:15px;cursor:pointer;letter-spacing:.04em;
-    pointer-events:auto;transition:transform .08s ease,filter .15s ease;}
-  button:hover{filter:brightness(1.07);} button:active{transform:translateY(1px);}
+    color:#fff;font:inherit;font-weight:700;font-size:15px;cursor:pointer;letter-spacing:.04em;
+    pointer-events:auto;transition:transform .08s ease,filter .15s ease;box-shadow:0 6px 16px rgba(255,90,122,.3);}
+  button:hover{filter:brightness(1.05);} button:active{transform:translateY(1px);}
   .hint{margin-top:18px;font-size:11px;color:var(--muted);letter-spacing:.04em;line-height:1.7;}
   .hidden{display:none!important;}
-  .deathreason{font-size:12px;color:#ff7a7a;letter-spacing:.1em;text-transform:uppercase;margin-bottom:6px;}
+  .deathreason{font-size:12px;color:var(--accent);letter-spacing:.1em;text-transform:uppercase;margin-bottom:6px;}
 </style>
 </head>
 <body>
@@ -74,20 +74,24 @@
   <div class="inner card" style="border:none;background:transparent;">
     <div class="title">Territory</div>
     <div class="head">Claim the map.</div>
-    <div class="sub">Leave home, draw a loop, return to fill it.<br>Touch any trail — including your own — and you're out.</div>
+    <div class="sub">Leave home, draw a loop, return to fill it.<br>Cut a rival's trail and you steal everything they own.</div>
     <input id="nameInput" maxlength="16" placeholder="your name" autocomplete="off" />
     <button id="playBtn">Enter the world</button>
-    <div class="hint">↑ ↓ ← → or W A S D to steer · 90° turns only</div>
+    <div class="hint">↑ ↓ ← → or W A S D to steer · 90° turns · SPACE to respawn</div>
   </div>
 </div>
 
-<!-- DEATH -->
-<div id="deathScreen" class="screen hidden">
-  <div class="inner card" style="border:none;background:transparent;">
-    <div class="deathreason" id="deathReason">eliminated</div>
-    <div class="head">You were cut.</div>
-    <div class="sub" id="deathStat">Respawning…</div>
-    <button id="respawnBtn" class="hidden">Back in</button>
+<!-- DEATH (spectating overlay — does not block the view) -->
+<div id="deathScreen" class="hidden" style="position:fixed;inset:0;z-index:10;pointer-events:none;
+     display:flex;flex-direction:column;align-items:center;justify-content:flex-end;padding-bottom:64px;
+     background:linear-gradient(to bottom, rgba(20,18,14,0) 60%, rgba(20,18,14,.28));">
+  <div style="text-align:center;">
+    <div class="deathreason" id="deathReason" style="color:#fff;text-shadow:0 1px 6px rgba(0,0,0,.5);">eliminated</div>
+    <div id="spectateLabel" style="color:#fff;font-size:14px;text-shadow:0 1px 6px rgba(0,0,0,.5);margin-bottom:18px;">Spectating…</div>
+    <div id="respawnPrompt" style="display:inline-block;background:var(--accent);color:#fff;font-weight:700;
+         padding:12px 22px;border-radius:12px;box-shadow:0 6px 18px rgba(255,90,122,.4);letter-spacing:.04em;">
+      Press <b>SPACE</b> to respawn
+    </div>
   </div>
 </div>
 
@@ -102,6 +106,8 @@
   let myId = null;
   let ws = null;
   let connected = false;
+  let isDead = false;
+  let spectateId = null;               // entity id we're following while dead
 
   // server state (latest snapshot)
   let owner = null, trail = null;      // Uint8Array, decoded from RLE
@@ -121,8 +127,8 @@
   const myAreaEl = document.getElementById('myArea');
   const boardRows = document.getElementById('boardRows');
   const deathReason = document.getElementById('deathReason');
-  const deathStat = document.getElementById('deathStat');
-  const respawnBtn = document.getElementById('respawnBtn');
+  const spectateLabel = document.getElementById('spectateLabel');
+  const respawnPrompt = document.getElementById('respawnPrompt');
 
   function resize(){ cv.width = innerWidth * devicePixelRatio; cv.height = innerHeight * devicePixelRatio;
     ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0); }
@@ -149,7 +155,7 @@
         joinScreen.classList.add('hidden'); statusEl.textContent=''; }
       else if (m.t==='full'){ statusEl.textContent='world is full — try again shortly'; }
       else if (m.t==='state'){ applyState(m); }
-      else if (m.t==='death'){ onDeath(m.reason); }
+      else if (m.t==='death'){ onDeath(m.reason, m.killerId); }
       else if (m.t==='respawn'){ onRespawn(); }
     };
   }
@@ -187,29 +193,35 @@
   // ---- INPUT (intent only) ----
   const KEYMAP = {ArrowUp:'N',KeyW:'N',ArrowRight:'E',KeyD:'E',ArrowDown:'S',KeyS:'S',ArrowLeft:'W',KeyA:'W'};
   addEventListener('keydown', (e)=>{
+    // Space respawns while dead (Fortnite-style: spectate, then jump back in).
+    if (e.code==='Space' && isDead && connected && ws && ws.readyState===1){
+      ws.send(JSON.stringify({t:'respawn'})); e.preventDefault(); return;
+    }
+    if (isDead) return;                       // no steering while spectating
     const d = KEYMAP[e.code];
     if (d && connected && ws && ws.readyState===1){ ws.send(JSON.stringify({t:'turn', d})); e.preventDefault(); }
   });
-  // touch swipe -> discrete turn
+  // touch swipe -> discrete turn (or tap-to-respawn while dead)
   let tsx=0,tsy=0;
   addEventListener('touchstart',e=>{const t=e.changedTouches[0];tsx=t.clientX;tsy=t.clientY;},{passive:true});
   addEventListener('touchend',e=>{const t=e.changedTouches[0];const dx=t.clientX-tsx,dy=t.clientY-tsy;
+    if(isDead){ if(connected&&ws&&ws.readyState===1) ws.send(JSON.stringify({t:'respawn'})); return; }
     if(Math.abs(dx)<18&&Math.abs(dy)<18)return; let d;
     if(Math.abs(dx)>Math.abs(dy)) d=dx>0?'E':'W'; else d=dy>0?'S':'N';
     if(connected&&ws&&ws.readyState===1) ws.send(JSON.stringify({t:'turn',d}));},{passive:true});
 
   // ---- DEATH / RESPAWN ----
-  function onDeath(reason){
-    const labels={cut:'trail cut',self:'crossed your own trail',wall:'hit the border'};
+  function onDeath(reason, killerId){
+    const labels={cut:'cut by a rival',self:'crossed your own trail',wall:'hit the border'};
     deathReason.textContent = labels[reason]||'eliminated';
-    const me = ents.get(myId);
-    deathStat.textContent = 'Respawning…';
+    isDead = true;
+    // Spectate the killer if there is one; otherwise free-cam stays where we died.
+    spectateId = (killerId && ents.has(killerId)) ? killerId : null;
+    const killer = spectateId ? ents.get(spectateId) : null;
+    spectateLabel.textContent = killer ? ('Spectating '+killer.name) : 'Spectating the board';
     deathScreen.classList.remove('hidden');
-    respawnBtn.classList.add('hidden');
-    setTimeout(()=>{ respawnBtn.classList.remove('hidden'); deathStat.textContent='Ready when you are.'; }, 1500);
   }
-  function onRespawn(){ deathScreen.classList.add('hidden'); }
-  respawnBtn.onclick = ()=> deathScreen.classList.add('hidden');
+  function onRespawn(){ isDead=false; spectateId=null; deathScreen.classList.add('hidden'); }
 
   // ---- RENDER ----
   function lerp(a,b,t){return a+(b-a)*t;}
@@ -225,9 +237,10 @@
       const v=view.get(id); if(!v)continue;
       v.x=lerp(v.x,e.x,0.35); v.y=lerp(v.y,e.y,0.35);
     }
-    // camera follows me
-    const me = view.get(myId);
-    if(me){ camX=lerp(camX,me.x,0.12); camY=lerp(camY,me.y,0.12); }
+    // camera follows me — or my killer while I'm spectating
+    const camTargetId = (isDead && spectateId!=null) ? spectateId : myId;
+    const tgt = view.get(camTargetId) || view.get(myId);
+    if(tgt){ camX=lerp(camX,tgt.x,0.12); camY=lerp(camY,tgt.y,0.12); }
     camX=Math.max(0,Math.min(GW,camX)); camY=Math.max(0,Math.min(GH,camY));
 
     const cs=CELL_SCREEN;
@@ -238,60 +251,106 @@
     const x0=Math.max(0,Math.floor((-ox)/cs)-1), x1=Math.min(GW-1,Math.ceil((W-ox)/cs)+1);
     const y0=Math.max(0,Math.floor((-oy)/cs)-1), y1=Math.min(GH-1,Math.ceil((H-oy)/cs)+1);
 
-    // map backdrop
-    ctx.fillStyle='#11151c';
+    const colorOf=(id)=>{const e=ents.get(id);return e?e.color:'#bbb';};
+    const ownerAt=(x,y)=> (x<0||y<0||x>=GW||y>=GH) ? -1 : owner[y*GW+x];
+
+    // --- paper backdrop (off-white with a faint grid like graph paper) ---
+    ctx.fillStyle='#fbf9f3';
     ctx.fillRect(ox,oy,GW*cs,GH*cs);
-
-    // color lookup
-    const colorOf=(id)=>{const e=ents.get(id);return e?e.color:'#333';};
-
-    // owned territory
-    for(let y=y0;y<=y1;y++){
-      for(let x=x0;x<=x1;x++){
-        const o=owner[y*GW+x];
-        if(o!==0){ ctx.fillStyle=colorOf(o); ctx.globalAlpha=0.92;
-          ctx.fillRect(ox+x*cs, oy+y*cs, cs+1, cs+1); }
-      }
-    }
-    ctx.globalAlpha=1;
-    // trails (brighter, slightly inset)
-    for(let y=y0;y<=y1;y++){
-      for(let x=x0;x<=x1;x++){
-        const t=trail[y*GW+x];
-        if(t!==0){ ctx.fillStyle=colorOf(t); ctx.globalAlpha=0.6;
-          ctx.fillRect(ox+x*cs+cs*0.18, oy+y*cs+cs*0.18, cs*0.64, cs*0.64); }
-      }
-    }
-    ctx.globalAlpha=1;
-
-    // grid sheen
-    ctx.strokeStyle='rgba(255,255,255,0.03)';ctx.lineWidth=1;
+    ctx.strokeStyle='rgba(120,110,90,0.06)';ctx.lineWidth=1;
     ctx.beginPath();
     for(let x=x0;x<=x1+1;x++){const sx=ox+x*cs;ctx.moveTo(sx,oy+y0*cs);ctx.lineTo(sx,oy+(y1+1)*cs);}
     for(let y=y0;y<=y1+1;y++){const sy=oy+y*cs;ctx.moveTo(ox+x0*cs,sy);ctx.lineTo(ox+(x1+1)*cs,sy);}
     ctx.stroke();
 
-    // map border
-    ctx.strokeStyle='rgba(94,224,192,0.5)';ctx.lineWidth=2;
+    // --- territory drop shadow pass (gives the slightly-3D "paper cutout" look)
+    // Draw every owned cell offset down-right in soft dark; the fill pass on top
+    // then sits "above" it.
+    ctx.save();
+    ctx.fillStyle='rgba(70,60,45,0.18)';
+    const sh=Math.max(2,cs*0.16);
+    for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){
+      if(owner[y*GW+x]!==0){
+        // only shadow the bottom/right exposed edges to keep it cheap and clean
+        const below=ownerAt(x,y+1), right=ownerAt(x+1,y);
+        if(below===0||right===0||below===-1||right===-1){
+          ctx.fillRect(ox+x*cs+sh, oy+y*cs+sh, cs+0.5, cs+0.5);
+        }
+      }
+    }
+    ctx.restore();
+
+    // --- territory fill pass ---
+    for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){
+      const o=owner[y*GW+x];
+      if(o!==0){ ctx.fillStyle=colorOf(o); ctx.fillRect(ox+x*cs, oy+y*cs, cs+0.6, cs+0.6); }
+    }
+    // --- top highlight: lighten the upper edge of each region for a soft bevel
+    ctx.save();
+    ctx.fillStyle='rgba(255,255,255,0.22)';
+    for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){
+      const o=owner[y*GW+x];
+      if(o!==0 && ownerAt(x,y-1)!==o){ ctx.fillRect(ox+x*cs, oy+y*cs, cs+0.6, Math.max(1.5,cs*0.2)); }
+    }
+    ctx.restore();
+
+    // --- trails: glowing rounded ribbon in the owner's color ---
+    ctx.save();
+    for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){
+      const t=trail[y*GW+x];
+      if(t!==0){
+        const c=colorOf(t);
+        ctx.fillStyle=c; ctx.globalAlpha=0.85;
+        const pad=cs*0.16;
+        roundRect(ox+x*cs+pad, oy+y*cs+pad, cs-pad*2, cs-pad*2, cs*0.28);
+        ctx.fill();
+      }
+    }
+    ctx.globalAlpha=1; ctx.restore();
+
+    // --- map border (paper edge) ---
+    ctx.strokeStyle='rgba(120,110,90,0.5)';ctx.lineWidth=3;
     ctx.strokeRect(ox,oy,GW*cs,GH*cs);
 
-    // avatars
+    // --- avatars (smaller, soft shadow, rounded) ---
     for(const [id,e] of ents){
       if(e.dead)continue;
       const v=view.get(id); if(!v)continue;
       const sx=ox+v.x*cs, sy=oy+v.y*cs;
+      const r=cs*0.30;                          // smaller than before (was 0.46)
+      const mine=id===myId, watched=(isDead&&id===spectateId);
+      // soft contact shadow
+      ctx.save();
+      ctx.fillStyle='rgba(70,60,45,0.25)';
+      roundRect(sx-r+cs*0.07, sy-r+cs*0.1, r*2, r*2, r*0.5); ctx.fill();
+      ctx.restore();
+      // body
       ctx.fillStyle=e.color;
-      ctx.strokeStyle=id===myId?'#fff':'rgba(0,0,0,0.55)';
-      ctx.lineWidth=id===myId?3:2;
-      const r=cs*0.46;
-      ctx.beginPath(); ctx.roundRect(sx-r,sy-r,r*2,r*2,4); ctx.fill(); ctx.stroke();
-      // name
-      if(id===myId || !e.bot){
-        ctx.fillStyle='rgba(231,237,245,0.85)';ctx.font='11px ui-monospace,monospace';
-        ctx.textAlign='center';
-        ctx.fillText(e.name, sx, sy-r-5);
+      ctx.strokeStyle = mine?'#222' : watched?'#fff' : 'rgba(40,35,25,0.55)';
+      ctx.lineWidth = mine||watched?2.5:1.5;
+      roundRect(sx-r,sy-r,r*2,r*2,r*0.5); ctx.fill(); ctx.stroke();
+      // name tag (me, watched target, and all humans)
+      if(mine || watched || !e.bot){
+        const label=mine?e.name:(watched?e.name+' (killer)':e.name);
+        ctx.font='600 11px ui-monospace,monospace';ctx.textAlign='center';
+        const tw=ctx.measureText(label).width;
+        ctx.fillStyle='rgba(255,255,255,0.82)';
+        roundRect(sx-tw/2-5, sy-r-19, tw+10, 15, 5); ctx.fill();
+        ctx.fillStyle='#2b2b2b';
+        ctx.fillText(label, sx, sy-r-8);
       }
     }
+  }
+  // helper used by render
+  function roundRect(x,y,w,h,r){
+    r=Math.min(r,w/2,h/2);
+    ctx.beginPath();
+    ctx.moveTo(x+r,y);
+    ctx.arcTo(x+w,y,x+w,y+h,r);
+    ctx.arcTo(x+w,y+h,x,y+h,r);
+    ctx.arcTo(x,y+h,x,y,r);
+    ctx.arcTo(x,y,x+w,y,r);
+    ctx.closePath();
   }
   requestAnimationFrame(draw);
 
