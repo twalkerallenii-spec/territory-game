@@ -21,6 +21,8 @@ const SPAWN_BLOB = 3;                 // half-size of starting square (3 => 7x7)
 const SPAWN_SAFE_RADIUS = 14;         // min cells to nearest enemy avatar/trail
 const BOT_RESPAWN_MS = 60000;         // bots stay dead 1 minute, then auto-respawn
 const PLAYER_MIN_DEAD_MS = 0;         // humans respawn instantly on Space press
+const COIN_PER_KILL = 20;             // coins for cutting a rival
+const COIN_FULL_MAP = 1000;           // coins for controlling 100% of the map
 const PORT = process.env.PORT || 3000;
 
 const CELL_PER_TICK = CELLS_PER_SEC / TICK_RATE;
@@ -75,20 +77,32 @@ function distToNearestEnemy(cx, cy, selfId) {
   return best;
 }
 
-function findSpawn(selfId) {
-  for (let tries = 0; tries < 200; tries++) {
-    const cx = SPAWN_BLOB + 2 + Math.floor(Math.random() * (GRID_W - 2 * SPAWN_BLOB - 4));
-    const cy = SPAWN_BLOB + 2 + Math.floor(Math.random() * (GRID_H - 2 * SPAWN_BLOB - 4));
-    // blob must be neutral
+function findSpawn(selfId, blob) {
+  const B = blob || SPAWN_BLOB;
+  const M = 2;  // neutral margin around the spawn blob
+  for (let tries = 0; tries < 300; tries++) {
+    const cx = B + M + 1 + Math.floor(Math.random() * (GRID_W - 2 * (B + M) - 2));
+    const cy = B + M + 1 + Math.floor(Math.random() * (GRID_H - 2 * (B + M) - 2));
+    // blob + margin must be entirely neutral (never spawn inside or touching land)
     let ok = true;
-    for (let y = cy - SPAWN_BLOB; y <= cy + SPAWN_BLOB && ok; y++)
-      for (let x = cx - SPAWN_BLOB; x <= cx + SPAWN_BLOB; x++)
-        if (owner[idx(x, y)] !== 0) { ok = false; break; }
+    for (let y = cy - B - M; y <= cy + B + M && ok; y++)
+      for (let x = cx - B - M; x <= cx + B + M; x++) {
+        if (!inBounds(x, y) || owner[idx(x, y)] !== 0) { ok = false; break; }
+      }
     if (!ok) continue;
     if (distToNearestEnemy(cx, cy, selfId) < SPAWN_SAFE_RADIUS) continue;
     return { cx, cy };
   }
-  // fallback: anywhere central-ish
+  // relaxed fallback: just need the blob itself neutral
+  for (let tries = 0; tries < 200; tries++) {
+    const cx = B + 2 + Math.floor(Math.random() * (GRID_W - 2 * B - 4));
+    const cy = B + 2 + Math.floor(Math.random() * (GRID_H - 2 * B - 4));
+    let ok = true;
+    for (let y = cy - B; y <= cy + B && ok; y++)
+      for (let x = cx - B; x <= cx + B; x++)
+        if (owner[idx(x, y)] !== 0) { ok = false; break; }
+    if (ok) return { cx, cy };
+  }
   return { cx: Math.floor(GRID_W / 2), cy: Math.floor(GRID_H / 2) };
 }
 
@@ -100,18 +114,47 @@ function headingTowardCenter(cx, cy) {
 }
 
 function paintSpawnBlob(e) {
-  for (let y = e.cy - SPAWN_BLOB; y <= e.cy + SPAWN_BLOB; y++)
-    for (let x = e.cx - SPAWN_BLOB; x <= e.cx + SPAWN_BLOB; x++)
+  const B = e.blob || SPAWN_BLOB;
+  for (let y = e.cy - B; y <= e.cy + B; y++)
+    for (let x = e.cx - B; x <= e.cx + B; x++)
       if (inBounds(x, y)) owner[idx(x, y)] = e.id;
 }
 
-function spawnEntity({ isBot, name }) {
+// Exactly 12 fixed bot names (one per bot in the default field).
+const BOT_NAMES = [
+  'Aymeric', 'Boris', 'Vincent', 'Helga', 'Mateo', 'Priya',
+  'Søren', 'Akira', 'Olga', 'Diego', 'Freya', 'Tariq',
+];
+let botNameCursor = 0;
+function nextBotName() {
+  const used = new Set([...entities.values()].filter(e => e.isBot).map(e => e.name));
+  for (let k = 0; k < BOT_NAMES.length; k++) {
+    const n = BOT_NAMES[(botNameCursor + k) % BOT_NAMES.length];
+    if (!used.has(n)) { botNameCursor = (botNameCursor + k + 1) % BOT_NAMES.length; return n; }
+  }
+  return BOT_NAMES[(botNameCursor++) % BOT_NAMES.length];
+}
+
+// Power-up effects the server enforces. Loadout comes from the client on join;
+// validated against this whitelist so a hacked client can't invent effects.
+const POWERUPS = {
+  speed:  { speedMult: 1.8 },     // 2x-ish faster
+  big:    { sizeMult: 1.8 },      // bigger character (visual + hitbox-neutral)
+  zoom:   { zoomOut: true },      // client renders a wider view
+  head:   { startBlob: 5 },       // bigger starting territory (7x7 -> 11x11)
+  // remaining ids are client-cosmetic or reserved; server ignores unknowns
+};
+
+function spawnEntity({ isBot, name, loadout }) {
   const id = nextId++;
-  const { cx, cy } = findSpawn(id);
+  // Bigger starting blob if the "head start" power-up is equipped.
+  const lo = sanitizeLoadout(loadout);
+  const blob = lo.includes('head') ? POWERUPS.head.startBlob : SPAWN_BLOB;
+  const { cx, cy } = findSpawn(id, blob);
   const e = {
-    id, isBot, name: name || (isBot ? 'Bot ' + id : 'Player ' + id),
+    id, isBot, name: name || (isBot ? nextBotName() : 'Player ' + id),
     color: freeColor(),
-    cx, cy,
+    cx, cy, blob,
     px: cx + 0.5, py: cy + 0.5,        // continuous position (Blueprint Sec 1)
     heading: headingTowardCenter(cx, cy),
     pendingTurn: null,
@@ -121,6 +164,10 @@ function spawnEntity({ isBot, name }) {
     dead: false,
     respawnAt: 0,
     killerId: 0,
+    kills: 0,
+    loadout: lo,
+    speedMult: lo.includes('speed') ? POWERUPS.speed.speedMult : 1,
+    sizeMult: lo.includes('big') ? POWERUPS.big.sizeMult : 1,
     // bot personality (varies behavior so 12 AI don't act identically)
     botAggro: isBot ? 0.3 + Math.random() * 0.6 : 0,   // willingness to hunt trails
     botGreed: isBot ? 12 + Math.random() * 28 : 0,      // trail length before retreating
@@ -131,6 +178,12 @@ function spawnEntity({ isBot, name }) {
   paintSpawnBlob(e);
   recomputeArea(e);
   return e;
+}
+
+function sanitizeLoadout(loadout) {
+  if (!Array.isArray(loadout)) return [];
+  const valid = Object.keys(POWERUPS);
+  return [...new Set(loadout)].filter(p => valid.includes(p)).slice(0, 6);
 }
 
 function clearTrail(e) {
@@ -173,6 +226,10 @@ function killEntity(e, reason, killer) {
   if (killer && killer.id !== e.id && !killer.dead) {
     transferTerritory(e.id, killer.id);
     recomputeArea(killer);
+    killer.kills = (killer.kills || 0) + 1;
+    if (!killer.isBot && killer.ws && killer.ws.readyState === 1) {
+      send(killer.ws, { t: 'kill', coins: COIN_PER_KILL, total: killer.kills });
+    }
   } else {
     releaseTerritory(e);
   }
@@ -261,6 +318,12 @@ function captureTerritory(e) {
     const enemy = entities.get(enemyId);
     if (enemy) recomputeArea(enemy);
   }
+
+  // 100% of the map controlled -> big coin reward (once per achievement).
+  if (!e.isBot && e.area >= GRID_W * GRID_H && !e._gotFullMap) {
+    e._gotFullMap = true;
+    if (e.ws && e.ws.readyState === 1) send(e.ws, { t: 'fullmap', coins: COIN_FULL_MAP });
+  }
 }
 
 // ---- LOGICAL STEP into a new cell (Blueprint Sec 3A) -----------------------
@@ -298,50 +361,57 @@ function enterCell(e, x, y) {
   }
 }
 
-// Supercover march from one cell to an adjacent cell. For 4-dir movement the
-// step is always exactly one cell, but we keep this explicit for clarity and
-// to guard against future speed changes (Blueprint Sec 3C anti-tunneling).
+// Advance one tick. Accumulates fractional movement, then commits whole-cell
+// steps one at a time (supercover) so even a fast avatar lays trail in every
+// cell it passes and can't tunnel through a 1-cell trail (Blueprint Sec 3C).
 function advance(e) {
   if (e.dead) return;
-  const [dx, dy] = DIRS[e.heading];
 
-  // WALL = slide, don't die (Blueprint Sec 4A/Rule 5 clamp option). If the next
-  // cell in our heading is off the map, apply any queued turn immediately; if
-  // that still points into the wall, hold position at the edge (no movement,
-  // no death) until the player turns to a legal direction.
-  const nextCx = e.cx + dx, nextCy = e.cy + dy;
-  if (!inBounds(nextCx, nextCy)) {
-    if (e.pendingTurn && e.pendingTurn !== OPP[e.heading]) {
-      const [tx, ty] = DIRS[e.pendingTurn];
-      if (inBounds(e.cx + tx, e.cy + ty)) {
-        e.heading = e.pendingTurn;
-        e.pendingTurn = null;
+  // distance to travel this tick, in cells
+  let remaining = CELL_PER_TICK * (e.speedMult || 1);
+  // fractional position within the current cell, measured along heading
+  e._frac = (e._frac || 0);
+
+  while (!e.dead && remaining > 0) {
+    const [dx, dy] = DIRS[e.heading];
+    const aheadInBounds = inBounds(e.cx + dx, e.cy + dy);
+
+    // WALL = slide, not death. If facing the wall, try a queued turn; if still
+    // facing it, stop here for the tick (hold at the edge).
+    if (!aheadInBounds) {
+      if (e.pendingTurn && e.pendingTurn !== OPP[e.heading]) {
+        const [tx, ty] = DIRS[e.pendingTurn];
+        if (inBounds(e.cx + tx, e.cy + ty)) { e.heading = e.pendingTurn; e.pendingTurn = null; e._frac = 0; continue; }
       }
+      e._frac = 0; e.px = e.cx + 0.5; e.py = e.cy + 0.5;
+      break;
     }
-    // re-evaluate after a possible turn
-    const [hx, hy] = DIRS[e.heading];
-    if (!inBounds(e.cx + hx, e.cy + hy)) {
-      // still facing the wall: clamp at cell center and wait
-      e.px = e.cx + 0.5; e.py = e.cy + 0.5;
-      return;
+
+    const toBoundary = 1 - e._frac;          // distance left to the next cell center
+    if (remaining < toBoundary) {
+      e._frac += remaining; remaining = 0;
+    } else {
+      remaining -= toBoundary; e._frac = 0;
+      // we cross into the next cell now; apply a queued turn at the boundary
+      if (e.pendingTurn && e.pendingTurn !== OPP[e.heading]) {
+        const [tx, ty] = DIRS[e.pendingTurn];
+        if (inBounds(e.cx + tx, e.cy + ty)) { e.heading = e.pendingTurn; }
+        e.pendingTurn = null;
+        // turning consumes the rest of this tick to keep trails axis-aligned
+        const [hx, hy] = DIRS[e.heading];
+        if (inBounds(e.cx + hx, e.cy + hy)) { enterCell(e, e.cx + hx, e.cy + hy); }
+        remaining = 0;
+      } else {
+        enterCell(e, e.cx + dx, e.cy + dy);
+      }
     }
   }
 
-  e.px += DIRS[e.heading][0] * CELL_PER_TICK;
-  e.py += DIRS[e.heading][1] * CELL_PER_TICK;
-
-  // Has the continuous position crossed into a new cell center?
-  const ncx = Math.floor(e.px);
-  const ncy = Math.floor(e.py);
-  if (ncx !== e.cx || ncy !== e.cy) {
-    // Apply a queued turn only when aligned to the grid (Blueprint Sec 4A).
-    if (e.pendingTurn && e.pendingTurn !== OPP[e.heading]) {
-      e.heading = e.pendingTurn;
-    }
-    e.pendingTurn = null;
-    enterCell(e, ncx, ncy);
-    // re-center continuous pos to the new cell to keep turns axis-aligned
-    if (!e.dead) { e.px = e.cx + 0.5; e.py = e.cy + 0.5; }
+  // sync continuous position from logical cell + fraction (for smooth rendering)
+  if (!e.dead) {
+    const [hx, hy] = DIRS[e.heading];
+    e.px = e.cx + 0.5 + hx * e._frac;
+    e.py = e.cy + 0.5 + hy * e._frac;
   }
 }
 
@@ -458,11 +528,11 @@ function maintainBots() {
 }
 
 function respawnEntity(e) {
-  const { cx, cy } = findSpawn(e.id);
+  const { cx, cy } = findSpawn(e.id, e.blob);
   e.cx = cx; e.cy = cy; e.px = cx + 0.5; e.py = cy + 0.5;
   e.heading = headingTowardCenter(cx, cy);
   e.pendingTurn = null; e.isOutside = false; e.trailCells.length = 0;
-  e.dead = false; e.killerId = 0;
+  e.dead = false; e.killerId = 0; e._gotFullMap = false; e._frac = 0;
   paintSpawnBlob(e); recomputeArea(e);
   if (e.ws && e.ws.readyState === 1) send(e.ws, { t: 'respawn', id: e.id });
 }
@@ -509,7 +579,7 @@ function broadcastState() {
       id: e.id, n: e.name, c: e.color, b: e.isBot ? 1 : 0,
       x: +e.px.toFixed(2), y: +e.py.toFixed(2), h: e.heading,
       o: e.isOutside ? 1 : 0, a: e.area, d: e.dead ? 1 : 0,
-      k: e.killerId || 0,
+      k: e.killerId || 0, sz: e.sizeMult || 1, sk: e.skin || 'default',
     });
   }
   const msg = JSON.stringify({
@@ -555,14 +625,20 @@ wss.on('connection', (ws) => {
 
     if (m.t === 'join') {
       const name = ('' + (m.name || 'Player')).slice(0, 16) || 'Player';
-      player = spawnEntity({ isBot: false, name });
+      player = spawnEntity({ isBot: false, name, loadout: m.loadout });
       player.ws = ws;
-      send(ws, { t: 'welcome', id: player.id, w: GRID_W, h: GRID_H });
+      player.skin = (typeof m.skin === 'string') ? m.skin.slice(0, 24) : 'default';
+      send(ws, { t: 'welcome', id: player.id, w: GRID_W, h: GRID_H, loadout: player.loadout });
     } else if (m.t === 'turn' && player && !player.dead) {
       if (['N', 'E', 'S', 'W'].includes(m.d)) player.pendingTurn = m.d;  // intent only
     } else if (m.t === 'respawn' && player && player.dead) {
-      // Space-bar respawn: instant for human players.
-      respawnEntity(player);
+      respawnEntity(player);                         // Space-bar respawn (instant)
+    } else if (m.t === 'chat' && player) {
+      const text = ('' + (m.text || '')).slice(0, 120).trim();
+      if (text) {
+        const out = JSON.stringify({ t: 'chat', name: player.name, color: player.color, text });
+        for (const e of entities.values()) if (e.ws && e.ws.readyState === 1) e.ws.send(out);
+      }
     }
   });
 

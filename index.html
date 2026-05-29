@@ -23,6 +23,7 @@
   #board h2{margin:0 0 10px;font-size:11px;letter-spacing:.18em;text-transform:uppercase;
     color:var(--muted);font-weight:600;}
   .row{display:flex;align-items:center;gap:8px;font-size:13px;padding:3px 0;}
+  .rank{width:16px;text-align:right;color:var(--muted);font-weight:700;font-variant-numeric:tabular-nums;}
   .dot{width:11px;height:11px;border-radius:3px;flex:0 0 auto;}
   .nm{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   .pct{color:var(--muted);font-variant-numeric:tabular-nums;}
@@ -76,6 +77,54 @@
   .hint{margin-top:18px;font-size:11px;color:var(--muted);letter-spacing:.04em;line-height:1.7;}
   .hidden{display:none!important;}
   .deathreason{font-size:12px;color:var(--accent);letter-spacing:.1em;text-transform:uppercase;margin-bottom:6px;}
+
+  /* coin bar + menu buttons */
+  .coinbar{position:absolute;top:18px;right:20px;background:rgba(255,255,255,.9);border:1px solid var(--line);
+    border-radius:999px;padding:8px 16px;font-weight:700;color:#7a5b15;z-index:2;box-shadow:0 6px 18px rgba(120,110,90,.15);}
+  .coinIcon{color:#f5b301;}
+  .menurow{display:flex;gap:10px;margin-top:12px;}
+  button.ghost{flex:1;background:rgba(255,255,255,.7);color:#5a5346;border:1px solid var(--line);
+    box-shadow:none;font-weight:700;}
+  button.ghost:hover{filter:none;background:#fff;color:var(--accent);}
+  #loadoutHint{color:var(--accent);min-height:14px;}
+
+  /* modals */
+  .modal{position:fixed;inset:0;z-index:20;display:flex;align-items:center;justify-content:center;
+    background:rgba(40,35,25,.45);backdrop-filter:blur(4px);}
+  .modalcard{width:min(640px,94vw);max-height:86vh;overflow:auto;background:#fdfbf6;border:1px solid var(--line);
+    border-radius:20px;padding:22px 22px 26px;box-shadow:0 30px 80px rgba(60,50,35,.35);}
+  .modalhead{display:flex;align-items:center;gap:12px;font-size:20px;font-weight:800;color:var(--ink);}
+  .modalhead .coinpill{margin-left:auto;font-size:14px;background:#fff7e0;border:1px solid #f0e0a8;
+    border-radius:999px;padding:5px 12px;color:#7a5b15;font-weight:700;}
+  .modalhead .x{background:none;border:none;font-size:18px;color:#9a8f7a;cursor:pointer;width:auto;padding:4px 8px;box-shadow:none;}
+  .modalsub{color:var(--muted);font-size:13px;margin:8px 0 16px;}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:12px;}
+  .item{border:1px solid var(--line);border-radius:14px;padding:14px;background:#fff;text-align:center;
+    display:flex;flex-direction:column;gap:8px;align-items:center;}
+  .item .ic{font-size:26px;}
+  .item .nm{font-weight:700;font-size:13px;color:var(--ink);}
+  .item .ds{font-size:11px;color:var(--muted);line-height:1.45;min-height:30px;}
+  .item .swatch{width:34px;height:34px;border-radius:9px;}
+  .item button{width:100%;padding:8px;font-size:12px;border-radius:9px;box-shadow:none;}
+  .item button.owned{background:#e8eee6;color:#3a6b3a;cursor:default;}
+  .item button.equip{background:#4a8;}
+  .item button.equipped{background:#2b7a4b;color:#fff;cursor:default;}
+  .item button.locked{background:#f0e0a8;color:#7a5b15;}
+  .item button.cant{background:#eee;color:#aaa;cursor:not-allowed;}
+
+  /* chat */
+  #chatToggle{position:absolute;left:14px;bottom:14px;width:44px;height:44px;border-radius:14px;
+    border:1px solid var(--line);background:rgba(255,255,255,.9);font-size:20px;cursor:pointer;z-index:6;
+    pointer-events:auto;box-shadow:0 6px 18px rgba(120,110,90,.18);padding:0;}
+  #chatPanel{position:absolute;left:14px;bottom:14px;width:min(320px,80vw);z-index:7;
+    background:rgba(255,255,255,.95);border:1px solid var(--line);border-radius:16px;overflow:hidden;
+    box-shadow:0 14px 40px rgba(120,105,80,.25);}
+  #chatLog{max-height:200px;overflow-y:auto;padding:12px 14px;font-size:13px;line-height:1.5;}
+  #chatLog .msg{margin-bottom:4px;word-wrap:break-word;}
+  #chatLog .msg b{font-weight:700;}
+  #chatInputRow{display:flex;gap:6px;padding:10px;border-top:1px solid var(--line);}
+  #chatInput{flex:1;margin:0;padding:9px 11px;font-size:13px;}
+  #chatSend{width:auto;padding:9px 14px;font-size:13px;box-shadow:none;}
 </style>
 </head>
 <body>
@@ -98,6 +147,7 @@
 
 <!-- JOIN -->
 <div id="joinScreen" class="screen">
+  <div class="coinbar" id="coinBar"><span class="coinIcon">●</span> <span id="coinAmt">0</span></div>
   <div class="joinwrap">
     <div class="floaties" id="floaties"></div>
     <div class="inner">
@@ -112,22 +162,63 @@
         <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" style="vertical-align:-3px;margin-right:8px"><path d="M8 5v14l11-7z"/></svg>
         Play
       </button>
+      <div class="menurow">
+        <button class="ghost" id="shopBtn">🛒 Shop</button>
+        <button class="ghost" id="skinsBtn">🎨 Skins</button>
+      </div>
       <div class="hint">↑ ↓ ← → or W A S D to steer · SPACE to respawn</div>
+      <div class="hint" id="loadoutHint"></div>
     </div>
+  </div>
+</div>
+
+<!-- SHOP modal -->
+<div id="shopModal" class="modal hidden">
+  <div class="modalcard">
+    <div class="modalhead"><span>🛒 Power-up Shop</span>
+      <span class="coinpill"><span class="coinIcon">●</span> <span id="shopCoins">0</span></span>
+      <button class="x" data-close>✕</button></div>
+    <p class="modalsub">Buy a power-up, then equip up to 3 for your next match. Effects last one life.</p>
+    <div id="shopGrid" class="grid"></div>
+  </div>
+</div>
+
+<!-- SKINS modal -->
+<div id="skinsModal" class="modal hidden">
+  <div class="modalcard">
+    <div class="modalhead"><span>🎨 Skins</span>
+      <span class="coinpill"><span class="coinIcon">●</span> <span id="skinCoins">0</span></span>
+      <button class="x" data-close>✕</button></div>
+    <p class="modalsub">Buy a skin and equip it. Skins are cosmetic only.</p>
+    <div id="skinGrid" class="grid"></div>
   </div>
 </div>
 
 <!-- DEATH (spectating overlay — does not block the view) -->
 <div id="deathScreen" class="hidden" style="position:fixed;inset:0;z-index:10;pointer-events:none;
-     display:flex;flex-direction:column;align-items:center;justify-content:flex-end;padding-bottom:64px;
-     background:linear-gradient(to bottom, rgba(20,18,14,0) 60%, rgba(20,18,14,.28));">
+     display:flex;flex-direction:column;align-items:center;justify-content:flex-end;padding-bottom:56px;
+     background:linear-gradient(to bottom, rgba(20,18,14,0) 55%, rgba(20,18,14,.32));">
   <div style="text-align:center;">
     <div class="deathreason" id="deathReason" style="color:#fff;text-shadow:0 1px 6px rgba(0,0,0,.5);">eliminated</div>
-    <div id="spectateLabel" style="color:#fff;font-size:14px;text-shadow:0 1px 6px rgba(0,0,0,.5);margin-bottom:18px;">Spectating…</div>
+    <div id="spectateLabel" style="color:#fff;font-size:14px;text-shadow:0 1px 6px rgba(0,0,0,.5);margin-bottom:16px;">Spectating…</div>
     <div id="respawnPrompt" style="display:inline-block;background:var(--accent);color:#fff;font-weight:700;
          padding:12px 22px;border-radius:12px;box-shadow:0 6px 18px rgba(255,90,122,.4);letter-spacing:.04em;">
       Press <b>SPACE</b> to respawn
     </div>
+    <div style="margin-top:14px;">
+      <button id="deathMenuBtn" style="pointer-events:auto;background:rgba(255,255,255,.9);color:#2b2b2b;
+        border:none;border-radius:10px;padding:9px 18px;font:inherit;font-weight:700;cursor:pointer;">Main menu</button>
+    </div>
+  </div>
+</div>
+
+<!-- CHAT -->
+<button id="chatToggle" class="hidden" title="Chat">💬</button>
+<div id="chatPanel" class="hidden">
+  <div id="chatLog"></div>
+  <div id="chatInputRow">
+    <input id="chatInput" maxlength="120" placeholder="say something…" autocomplete="off" />
+    <button id="chatSend">Send</button>
   </div>
 </div>
 
@@ -136,7 +227,8 @@
   'use strict';
   const cv = document.getElementById('game');
   const ctx = cv.getContext('2d');
-  const CELL_SCREEN = 14;              // px per cell at base zoom (render only)
+  let CELL_SCREEN = 14;                // px per cell (changes with zoom-out power-up)
+  const BASE_CELL = 14;
 
   let GW = 160, GH = 160;
   let myId = null;
@@ -144,6 +236,53 @@
   let connected = false;
   let isDead = false;
   let spectateId = null;               // entity id we're following while dead
+  let zoomOut = false;                 // set by the zoom power-up for this match
+
+  // ---- ECONOMY (browser-saved; swap to real accounts later) ----------------
+  const SHOP = [
+    {id:'speed', ic:'⚡', nm:'Speed Boost',  ds:'Move ~2× faster.',            cost:150},
+    {id:'big',   ic:'🟦', nm:'Big Mode',     ds:'Start ~2× bigger.',           cost:150},
+    {id:'zoom',  ic:'🔭', nm:'Wide View',    ds:'See more of the map.',        cost:120},
+    {id:'head',  ic:'🏰', nm:'Head Start',   ds:'Bigger starting territory.',  cost:200},
+    {id:'magnet',ic:'🧲', nm:'Coin Magnet',  ds:'+50% coins this match.',      cost:250},
+    {id:'shield',ic:'🛡️', nm:'Quick Shield', ds:'Brief spawn protection.',     cost:180},
+    {id:'dash',  ic:'💨', nm:'Dasher',       ds:'Snappier turns.',             cost:130},
+    {id:'ghost', ic:'👻', nm:'Ghost Trail',  ds:'Fainter trail, harder to spot.',cost:160},
+    {id:'scout', ic:'🛰️', nm:'Scout',        ds:'Tiny minimap glow.',          cost:140},
+    {id:'lucky', ic:'🍀', nm:'Lucky Start',  ds:'Spawn farther from rivals.',  cost:110},
+  ];
+  const SKINS = [
+    {id:'default', nm:'Classic',   color:null,       cost:0},
+    {id:'sunset',  nm:'Sunset',    color:'#ff6b3d',  cost:100},
+    {id:'ocean',   nm:'Ocean',     color:'#1f9bd1',  cost:100},
+    {id:'forest',  nm:'Forest',    color:'#2e8b57',  cost:100},
+    {id:'grape',   nm:'Grape',     color:'#8e44ad',  cost:120},
+    {id:'gold',    nm:'Gold',      color:'#f1c40f',  cost:200},
+    {id:'rose',    nm:'Rose',      color:'#ff5a7a',  cost:150},
+    {id:'mint',    nm:'Mint',      color:'#1abc9c',  cost:120},
+  ];
+  const MAX_EQUIP = 3;
+
+  function loadStore(){
+    try{ return JSON.parse(localStorage.getItem('territory_save')||'{}'); }catch(_){ return {}; }
+  }
+  function saveStore(s){ try{ localStorage.setItem('territory_save', JSON.stringify(s)); }catch(_){ } }
+  let store = loadStore();
+  store.coins = store.coins ?? 300;                 // starter coins
+  store.owned = store.owned || {};                  // power-up ids owned
+  store.skins = store.skins || {default:true};      // owned skins
+  store.equip = store.equip || [];                  // equipped power-ups for next match
+  store.skin  = store.skin  || 'default';           // equipped skin
+  saveStore(store);
+
+  function addCoins(n){ store.coins += n; saveStore(store); refreshCoinUI(); }
+  function refreshCoinUI(){
+    document.getElementById('coinAmt').textContent = store.coins;
+    const sc=document.getElementById('shopCoins'); if(sc) sc.textContent=store.coins;
+    const kc=document.getElementById('skinCoins'); if(kc) kc.textContent=store.coins;
+    const lh=document.getElementById('loadoutHint');
+    if(lh) lh.textContent = store.equip.length ? ('Equipped: '+store.equip.map(id=>(SHOP.find(s=>s.id===id)||{}).nm).join(', ')) : '';
+  }
 
   // server state (latest snapshot)
   let owner = null, trail = null;      // Uint8Array, decoded from RLE
@@ -178,21 +317,30 @@
   }
 
   // ---- WS ----
+  let coinMult = 1;                     // raised by the magnet power-up this match
   function connect(name){
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     ws = new WebSocket(`${proto}://${location.host}`);
+    // apply client-side power-up effects for this match
+    zoomOut = store.equip.includes('zoom');
+    CELL_SCREEN = zoomOut ? 9 : BASE_CELL;
+    coinMult = store.equip.includes('magnet') ? 1.5 : 1;
     ws.onopen = () => { connected = true; statusEl.textContent='joining…';
-      ws.send(JSON.stringify({t:'join', name})); };
+      ws.send(JSON.stringify({t:'join', name, loadout: store.equip, skin: store.skin})); };
     ws.onclose = () => { connected = false; statusEl.textContent='disconnected — refresh to reconnect'; };
     ws.onerror = () => { statusEl.textContent='connection error'; };
     ws.onmessage = (ev) => {
       const m = JSON.parse(ev.data);
       if (m.t==='welcome'){ myId=m.id; GW=m.w; GH=m.h; hud.classList.remove('hidden');
-        joinScreen.classList.add('hidden'); statusEl.textContent=''; }
+        joinScreen.classList.add('hidden'); closeModals(); statusEl.textContent='';
+        document.getElementById('chatToggle').classList.remove('hidden'); }
       else if (m.t==='full'){ statusEl.textContent='world is full — try again shortly'; }
       else if (m.t==='state'){ applyState(m); }
       else if (m.t==='death'){ onDeath(m.reason, m.killerId); }
       else if (m.t==='respawn'){ onRespawn(); }
+      else if (m.t==='kill'){ addCoins(Math.round((m.coins||20)*coinMult)); flashCoins('+'+Math.round((m.coins||20)*coinMult)); }
+      else if (m.t==='fullmap'){ addCoins(Math.round((m.coins||1000)*coinMult)); flashCoins('+'+Math.round((m.coins||1000)*coinMult)+' 100%!'); }
+      else if (m.t==='chat'){ addChat(m.name, m.color, m.text); }
     };
   }
 
@@ -203,7 +351,7 @@
     const seen = new Set();
     for (const e of m.ents){
       seen.add(e.id);
-      ents.set(e.id, {x:e.x,y:e.y,h:e.h,color:e.c,name:e.n,area:e.a,outside:e.o,bot:e.b,dead:e.d});
+      ents.set(e.id, {x:e.x,y:e.y,h:e.h,color:e.c,name:e.n,area:e.a,outside:e.o,bot:e.b,dead:e.d,sz:e.sz||1,sk:e.sk||'default'});
       if (!view.has(e.id)) view.set(e.id, {x:e.x,y:e.y});
     }
     for (const id of [...ents.keys()]) if(!seen.has(id)){ ents.delete(id); view.delete(id); }
@@ -214,12 +362,11 @@
     const total = GW*GH;
     const list = [...ents.entries()].map(([id,e])=>({id,...e}))
       .sort((a,b)=>b.area-a.area).slice(0,8);
-    boardRows.innerHTML = list.map(e=>{
+    boardRows.innerHTML = list.map((e,i)=>{
       const pct = (e.area/total*100).toFixed(2);
       const me = e.id===myId ? ' me':'';
-      const tag = e.bot ? '' : '';
-      return `<div class="row${me}"><span class="dot" style="background:${e.color}"></span>`+
-             `<span class="nm">${escapeHtml(e.name)}${tag}</span><span class="pct">${pct}%</span></div>`;
+      return `<div class="row${me}"><span class="rank">${i+1}</span><span class="dot" style="background:${e.color}"></span>`+
+             `<span class="nm">${escapeHtml(e.name)}</span><span class="pct">${pct}%</span></div>`;
     }).join('');
     const me = ents.get(myId);
     if (me) myAreaEl.textContent = (me.area/total*100).toFixed(2)+'%';
@@ -229,6 +376,9 @@
   // ---- INPUT (intent only) ----
   const KEYMAP = {ArrowUp:'N',KeyW:'N',ArrowRight:'E',KeyD:'E',ArrowDown:'S',KeyS:'S',ArrowLeft:'W',KeyA:'W'};
   addEventListener('keydown', (e)=>{
+    // Don't steer/respawn while typing in a text field (chat box, name input).
+    const tag = (e.target && e.target.tagName) || '';
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
     // Space respawns while dead (Fortnite-style: spectate, then jump back in).
     if (e.code==='Space' && isDead && connected && ws && ws.readyState===1){
       ws.send(JSON.stringify({t:'respawn'})); e.preventDefault(); return;
@@ -353,7 +503,8 @@
       if(e.dead)continue;
       const v=view.get(id); if(!v)continue;
       const sx=ox+v.x*cs, sy=oy+v.y*cs;
-      const r=cs*0.32;
+      const r=cs*0.42*(e.sz||1);
+      const bodyColor = skinColor(e.sk) || e.color;
       const mine=id===myId, watched=(isDead&&id===spectateId);
       // soft contact shadow
       ctx.save();
@@ -361,8 +512,8 @@
       roundRect(sx-r+cs*0.07, sy-r+cs*0.11, r*2, r*2, r*0.45); ctx.fill();
       ctx.restore();
       // body (border is a darker shade of the same color, like paper.io)
-      ctx.fillStyle=e.color;
-      ctx.strokeStyle = shade(e.color,-0.35);
+      ctx.fillStyle=bodyColor;
+      ctx.strokeStyle = shade(bodyColor,-0.35);
       ctx.lineWidth = (mine||watched)?3:2;
       roundRect(sx-r,sy-r,r*2,r*2,r*0.45); ctx.fill(); ctx.stroke();
       // highlight ring for me / spectated killer
@@ -451,16 +602,125 @@
   })();
 
   // ---- home button: leave the world, back to the menu ----
-  document.getElementById('homeBtn').onclick = ()=>{
+  function goHome(){
     if(ws){ try{ws.close();}catch(_){ } ws=null; }
     connected=false; isDead=false; spectateId=null; myId=null;
     owner=null; trail=null; ents.clear(); view.clear();
     hud.classList.add('hidden');
     deathScreen.classList.add('hidden');
+    document.getElementById('chatToggle').classList.add('hidden');
+    document.getElementById('chatPanel').classList.add('hidden');
     joinScreen.classList.remove('hidden');
     statusEl.textContent='';
+    refreshCoinUI();
     nameInput.focus();
-  };
+  }
+  document.getElementById('homeBtn').onclick = goHome;
+  document.getElementById('deathMenuBtn').onclick = goHome;
+
+  // ---- skins helper (color override; null = use player's assigned color) ----
+  function skinColor(skId){
+    const s = SKINS.find(s=>s.id===skId);
+    return s ? s.color : null;
+  }
+
+  // ---- SHOP / SKINS ui ----
+  const shopModal=document.getElementById('shopModal');
+  const skinsModal=document.getElementById('skinsModal');
+  function closeModals(){ shopModal.classList.add('hidden'); skinsModal.classList.add('hidden'); }
+  document.querySelectorAll('[data-close]').forEach(b=>b.onclick=closeModals);
+  [shopModal,skinsModal].forEach(m=>m.addEventListener('click',e=>{ if(e.target===m) closeModals(); }));
+
+  function renderShop(){
+    const grid=document.getElementById('shopGrid');
+    grid.innerHTML = SHOP.map(p=>{
+      const owned = !!store.owned[p.id];
+      const equipped = store.equip.includes(p.id);
+      let btn;
+      if(!owned){
+        const can = store.coins>=p.cost;
+        btn = `<button class="${can?'locked':'cant'}" data-buy="${p.id}">${can?('Buy ● '+p.cost):('Need ● '+p.cost)}</button>`;
+      } else if(equipped){
+        btn = `<button class="equipped" data-unequip="${p.id}">Equipped ✓</button>`;
+      } else {
+        const room = store.equip.length<MAX_EQUIP;
+        btn = `<button class="${room?'equip':'cant'}" data-equip="${p.id}">${room?'Equip':'Slots full'}</button>`;
+      }
+      return `<div class="item"><div class="ic">${p.ic}</div><div class="nm">${p.nm}</div>`+
+             `<div class="ds">${p.ds}</div>${btn}</div>`;
+    }).join('');
+    grid.querySelectorAll('[data-buy]').forEach(b=>b.onclick=()=>{
+      const p=SHOP.find(s=>s.id===b.dataset.buy);
+      if(store.coins>=p.cost){ store.coins-=p.cost; store.owned[p.id]=true; saveStore(store); renderShop(); refreshCoinUI(); }
+    });
+    grid.querySelectorAll('[data-equip]').forEach(b=>b.onclick=()=>{
+      if(store.equip.length<MAX_EQUIP && !store.equip.includes(b.dataset.equip)){ store.equip.push(b.dataset.equip); saveStore(store); renderShop(); refreshCoinUI(); }
+    });
+    grid.querySelectorAll('[data-unequip]').forEach(b=>b.onclick=()=>{
+      store.equip = store.equip.filter(x=>x!==b.dataset.unequip); saveStore(store); renderShop(); refreshCoinUI();
+    });
+    refreshCoinUI();
+  }
+  function renderSkins(){
+    const grid=document.getElementById('skinGrid');
+    grid.innerHTML = SKINS.map(s=>{
+      const owned = !!store.skins[s.id];
+      const equipped = store.skin===s.id;
+      const sw = `<div class="swatch" style="background:${s.color||'#bbb'}"></div>`;
+      let btn;
+      if(!owned){
+        const can = store.coins>=s.cost;
+        btn = `<button class="${can?'locked':'cant'}" data-buyskin="${s.id}">${can?('Buy ● '+s.cost):('Need ● '+s.cost)}</button>`;
+      } else if(equipped){ btn = `<button class="equipped">Equipped ✓</button>`; }
+      else { btn = `<button class="equip" data-equipskin="${s.id}">Equip</button>`; }
+      return `<div class="item">${sw}<div class="nm">${s.nm}</div><div class="ds">${s.cost?('● '+s.cost):'Free'}</div>${btn}</div>`;
+    }).join('');
+    grid.querySelectorAll('[data-buyskin]').forEach(b=>b.onclick=()=>{
+      const s=SKINS.find(x=>x.id===b.dataset.buyskin);
+      if(store.coins>=s.cost){ store.coins-=s.cost; store.skins[s.id]=true; saveStore(store); renderSkins(); refreshCoinUI(); }
+    });
+    grid.querySelectorAll('[data-equipskin]').forEach(b=>b.onclick=()=>{
+      store.skin=b.dataset.equipskin; saveStore(store); renderSkins(); refreshCoinUI();
+    });
+    refreshCoinUI();
+  }
+  document.getElementById('shopBtn').onclick=()=>{ renderShop(); shopModal.classList.remove('hidden'); };
+  document.getElementById('skinsBtn').onclick=()=>{ renderSkins(); skinsModal.classList.remove('hidden'); };
+
+  // ---- coin flash feedback ----
+  let flashTimer=null;
+  function flashCoins(txt){
+    let el=document.getElementById('coinFlash');
+    if(!el){ el=document.createElement('div'); el.id='coinFlash';
+      el.style.cssText='position:fixed;top:60px;left:50%;transform:translateX(-50%);z-index:8;'+
+        'background:#fff7e0;border:1px solid #f0e0a8;color:#7a5b15;font-weight:800;padding:8px 16px;'+
+        'border-radius:999px;box-shadow:0 8px 20px rgba(120,110,90,.2);pointer-events:none;transition:opacity .3s;';
+      document.body.appendChild(el); }
+    el.textContent='● '+txt; el.style.opacity='1';
+    clearTimeout(flashTimer); flashTimer=setTimeout(()=>{el.style.opacity='0';},900);
+  }
+
+  // ---- chat ----
+  const chatToggle=document.getElementById('chatToggle');
+  const chatPanel=document.getElementById('chatPanel');
+  const chatLog=document.getElementById('chatLog');
+  const chatInput=document.getElementById('chatInput');
+  chatToggle.onclick=()=>{ const open=!chatPanel.classList.contains('hidden');
+    if(open){ chatPanel.classList.add('hidden'); } else { chatPanel.classList.remove('hidden'); chatToggle.classList.add('hidden'); chatInput.focus(); } };
+  function sendChat(){ const t=chatInput.value.trim(); if(t&&ws&&ws.readyState===1){ ws.send(JSON.stringify({t:'chat',text:t})); } chatInput.value=''; }
+  document.getElementById('chatSend').onclick=sendChat;
+  chatInput.addEventListener('keydown',e=>{ if(e.key==='Enter'){sendChat();e.stopPropagation();}
+    if(e.key==='Escape'){ chatPanel.classList.add('hidden'); chatToggle.classList.remove('hidden'); } });
+  // don't let chat typing steer the avatar
+  chatInput.addEventListener('keyup',e=>e.stopPropagation());
+  function addChat(name,color,text){
+    const d=document.createElement('div'); d.className='msg';
+    d.innerHTML=`<b style="color:${color}">${escapeHtml(name)}:</b> ${escapeHtml(text)}`;
+    chatLog.appendChild(d); chatLog.scrollTop=chatLog.scrollHeight;
+    while(chatLog.children.length>60) chatLog.removeChild(chatLog.firstChild);
+  }
+
+  refreshCoinUI();
 })();
 </script>
 </body>
