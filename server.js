@@ -18,11 +18,11 @@ const CELLS_PER_SEC = 13;             // base avatar speed (was 8 — faster gam
 const BOOST_MULT = 1.7;               // active speed-boost multiplier
 const BOOST_DURATION_MS = 10000;      // boost lasts 10s
 const BOOST_COOLDOWN_MS = 10000;      // then 10s to recharge
-const ROOM_CAP = 28;                  // max entities (humans + bots)
-const MIN_BOTS = 12;                  // competitive AI field
+const ROOM_CAP = 22;                  // max entities (humans + bots)
+const MIN_BOTS = 6;                   // CPU field (was 12)
 const SPAWN_BLOB = 3;                 // half-size of starting square (3 => 7x7)
 const SPAWN_SAFE_RADIUS = 14;         // min cells to nearest enemy avatar/trail
-const BOT_RESPAWN_MS = 60000;         // bots stay dead 1 minute, then auto-respawn
+const BOT_RESPAWN_MS = 120000;        // bots stay dead 2 minutes before auto-respawn
 const PLAYER_MIN_DEAD_MS = 0;         // humans respawn instantly on Space press
 const COIN_PER_KILL = 20;             // coins for cutting a rival
 const COIN_FULL_MAP = 1000;           // coins for controlling 100% of the map
@@ -96,17 +96,33 @@ function findSpawn(selfId, blob) {
     if (distToNearestEnemy(cx, cy, selfId) < SPAWN_SAFE_RADIUS) continue;
     return { cx, cy };
   }
-  // relaxed fallback: just need the blob itself neutral
-  for (let tries = 0; tries < 200; tries++) {
-    const cx = B + 2 + Math.floor(Math.random() * (GRID_W - 2 * B - 4));
-    const cy = B + 2 + Math.floor(Math.random() * (GRID_H - 2 * B - 4));
+  // relaxed fallback 1: blob itself must be neutral (drop the safety radius)
+  for (let tries = 0; tries < 400; tries++) {
+    const cx = B + 1 + Math.floor(Math.random() * (GRID_W - 2 * B - 2));
+    const cy = B + 1 + Math.floor(Math.random() * (GRID_H - 2 * B - 2));
     let ok = true;
     for (let y = cy - B; y <= cy + B && ok; y++)
       for (let x = cx - B; x <= cx + B; x++)
-        if (owner[idx(x, y)] !== 0) { ok = false; break; }
+        if (!inBounds(x, y) || owner[idx(x, y)] !== 0) { ok = false; break; }
     if (ok) return { cx, cy };
   }
-  return { cx: Math.floor(GRID_W / 2), cy: Math.floor(GRID_H / 2) };
+  // fallback 2: exhaustive scan for ANY fully-neutral blob (guarantees we never
+  // spawn inside someone's territory as long as one empty spot exists)
+  for (let cy = B + 1; cy < GRID_H - B - 1; cy++) {
+    for (let cx = B + 1; cx < GRID_W - B - 1; cx++) {
+      let ok = true;
+      for (let y = cy - B; y <= cy + B && ok; y++)
+        for (let x = cx - B; x <= cx + B; x++)
+          if (owner[idx(x, y)] !== 0) { ok = false; break; }
+      if (ok) return { cx, cy };
+    }
+  }
+  // last resort (map essentially full): center, and clear a small patch
+  const cx = Math.floor(GRID_W / 2), cy = Math.floor(GRID_H / 2);
+  for (let y = cy - B; y <= cy + B; y++)
+    for (let x = cx - B; x <= cx + B; x++)
+      if (inBounds(x, y)) owner[idx(x, y)] = 0;
+  return { cx, cy };
 }
 
 function headingTowardCenter(cx, cy) {
@@ -249,7 +265,8 @@ function killEntity(e, reason, killer) {
   e.boosting = false;
 
   clearTrail(e);
-  if (killer && killer.id !== e.id && !killer.dead) {
+  const stolen = killer && killer.id !== e.id && !killer.dead;
+  if (stolen) {
     transferTerritory(e.id, killer.id);
     recomputeArea(killer);
     killer.kills = (killer.kills || 0) + 1;
@@ -261,9 +278,19 @@ function killEntity(e, reason, killer) {
   }
   e.area = 0;
 
-  if (e.ws && e.ws.readyState === 1) {
-    send(e.ws, { t: 'death', reason, killerId: e.killerId, eliminated: e.eliminated || false,
-                 placement: e.eliminated ? brPlacement() : 0 });
+  if (e.mode === 'br') {
+    // Battle Royale: you're out. Full death/spectate + placement.
+    if (e.ws && e.ws.readyState === 1) {
+      send(e.ws, { t: 'death', reason, killerId: e.killerId, eliminated: true,
+                   placement: brPlacement() });
+    }
+  } else {
+    // Classic: you lose your land but immediately get a fresh beginner plot and
+    // keep playing — a quick "you got cut" notice, no spectate screen.
+    if (e.ws && e.ws.readyState === 1) {
+      send(e.ws, { t: 'cut', by: killer && killer.id !== e.id ? killer.name : null, reason });
+    }
+    respawnEntity(e);
   }
 }
 
@@ -354,11 +381,45 @@ function captureTerritory(e) {
     if (enemy) recomputeArea(enemy);
   }
 
-  // 100% of the map controlled -> big coin reward (once per achievement).
-  if (!e.isBot && e.area >= GRID_W * GRID_H && !e._gotFullMap) {
-    e._gotFullMap = true;
-    if (e.ws && e.ws.readyState === 1) send(e.ws, { t: 'fullmap', coins: COIN_FULL_MAP });
+  // ROUND WIN: dominating the map (≈100%) wipes the board and restarts everyone
+  // fresh. The winner gets the big coin reward.
+  const total = GRID_W * GRID_H;
+  if (e.area >= total * 0.99 && !roundResetting) {
+    if (!e.isBot && e.ws && e.ws.readyState === 1) {
+      send(e.ws, { t: 'fullmap', coins: COIN_FULL_MAP });
+    }
+    roundReset(e);
   }
+}
+
+// Wipe all territory/trails and respawn every entity with a fresh beginner blob.
+let roundResetting = false;
+function roundReset(winner) {
+  roundResetting = true;
+  owner.fill(0);
+  trail.fill(0);
+  const winnerName = winner ? winner.name : 'Someone';
+  for (const ent of entities.values()) {
+    ent.trailCells.length = 0;
+    ent.isOutside = false;
+    ent._gotFullMap = false;
+    ent._frac = 0;
+    if (ent.mode === 'br') {
+      // In BR a 100% means the round is over — that player wins; others stay out.
+      if (ent === winner) { /* keep */ }
+    }
+    if (!ent.dead) {
+      const { cx, cy } = findSpawn(ent.id, ent.blob);
+      ent.cx = cx; ent.cy = cy; ent.px = cx + 0.5; ent.py = cy + 0.5;
+      ent.heading = headingTowardCenter(cx, cy);
+      ent.pendingTurn = null; ent.boosting = false;
+      paintSpawnBlob(ent); recomputeArea(ent);
+    }
+    if (!ent.isBot && ent.ws && ent.ws.readyState === 1) {
+      send(ent.ws, { t: 'roundreset', winner: winnerName });
+    }
+  }
+  roundResetting = false;
 }
 
 // ---- LOGICAL STEP into a new cell (Blueprint Sec 3A) -----------------------

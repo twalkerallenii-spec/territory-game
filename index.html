@@ -410,6 +410,8 @@
       else if (m.t==='state'){ applyState(m); }
       else if (m.t==='death'){ onDeath(m.reason, m.killerId, m.eliminated, m.placement); }
       else if (m.t==='respawn'){ onRespawn(); }
+      else if (m.t==='cut'){ onCut(m.by); }
+      else if (m.t==='roundreset'){ onRoundReset(m.winner); }
       else if (m.t==='kill'){ const c=Math.round((m.coins||20)*coinMult); addCoins(c); flashCoins('+'+c); }
       else if (m.t==='fullmap'){ const c=Math.round((m.coins||1000)*coinMult); addCoins(c); flashCoins('+'+c+' 100%!'); }
       else if (m.t==='chat'){ addChat(m.name, m.color, m.text); }
@@ -498,6 +500,29 @@
     deathScreen.classList.remove('hidden');
   }
   function onRespawn(){ isDead=false; spectateId=null; deathScreen.classList.add('hidden'); }
+
+  // Classic: got cut but kept playing with a fresh beginner plot — quick banner.
+  function onCut(by){
+    isDead=false; spectateId=null; deathScreen.classList.add('hidden');
+    flashBanner(by ? ('✂️ Cut by '+by+' — fresh start!') : '✂️ You were cut — fresh start!', '#ff7a7a');
+  }
+  // Someone hit 100% — the whole map reset.
+  function onRoundReset(winner){
+    isDead=false; spectateId=null; deathScreen.classList.add('hidden');
+    flashBanner('👑 '+(winner||'Someone')+' took the whole map! New round.', '#ffd23f');
+  }
+  // generic center banner
+  let bannerTimer=null;
+  function flashBanner(text, color){
+    let el=document.getElementById('banner');
+    if(!el){ el=document.createElement('div'); el.id='banner';
+      el.style.cssText='position:fixed;top:90px;left:50%;transform:translateX(-50%);z-index:9;'+
+        'background:rgba(20,32,28,.92);color:#fff;font-weight:800;padding:12px 24px;border-radius:14px;'+
+        'box-shadow:0 10px 30px rgba(0,0,0,.35);pointer-events:none;transition:opacity .3s;font-size:15px;';
+      document.body.appendChild(el); }
+    el.textContent=text; el.style.borderLeft='4px solid '+(color||'#ffd23f'); el.style.opacity='1';
+    clearTimeout(bannerTimer); bannerTimer=setTimeout(()=>{el.style.opacity='0';},2200);
+  }
 
   // ---- RENDER ----
   function lerp(a,b,t){return a+(b-a)*t;}
