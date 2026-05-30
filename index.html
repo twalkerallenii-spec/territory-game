@@ -175,6 +175,22 @@
 
   #status{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);
     font-size:12px;color:var(--muted);letter-spacing:.05em;pointer-events:none;}
+
+  /* name input reject flash */
+  input.reject{border-color:#ff5a5a !important;animation:rejectShake .4s;}
+  @keyframes rejectShake{0%,100%{transform:translateX(0)}25%{transform:translateX(-6px)}75%{transform:translateX(6px)}}
+
+  /* map intro: "Starting match" -> name -> top-view */
+  #mapIntro{position:fixed;inset:0;z-index:16;display:flex;align-items:center;justify-content:center;
+    background:radial-gradient(120% 120% at 50% 40%, rgba(36,61,56,.96), rgba(16,26,23,.99));
+    opacity:0;transition:opacity .35s ease;pointer-events:none;}
+  #mapIntro.show{opacity:1;}
+  .mi-inner{text-align:center;color:#eef3f0;transform:scale(.9);transition:transform .4s cubic-bezier(.2,1.3,.4,1);}
+  #mapIntro.show .mi-inner{transform:scale(1);}
+  #miStarting{font-size:14px;letter-spacing:.4em;text-transform:uppercase;color:#ffd23f;font-weight:700;margin-bottom:14px;}
+  #miCanvas{width:220px;height:220px;border-radius:16px;box-shadow:0 20px 50px rgba(0,0,0,.5);background:#243d38;}
+  #miName{font-size:34px;font-weight:900;margin-top:16px;letter-spacing:-.01em;
+    text-shadow:0 3px 0 rgba(0,0,0,.3);}
 </style>
 </head>
 <body>
@@ -319,6 +335,15 @@
   </div>
 </div>
 
+<!-- MAP INTRO overlay -->
+<div id="mapIntro" class="hidden">
+  <div class="mi-inner">
+    <div id="miStarting">Starting match</div>
+    <canvas id="miCanvas"></canvas>
+    <div id="miName">The Arena</div>
+  </div>
+</div>
+
 <!-- CHAT -->
 <button id="chatToggle" class="hidden" title="Chat">💬</button>
 <div id="chatPanel" class="hidden">
@@ -386,16 +411,16 @@
 
   // ---- CHEATS (consumable; bought per use, applied in-game) -----------------
   const CHEATS = [
-    {id:'god',     ic:'😇', nm:'Full God',      ds:'Swap your land with the #1 player. Take it all.', cost:5000},
-    {id:'mach',    ic:'🚀', nm:'Mach Speed',    ds:'3× speed for 20 seconds.',                        cost:4000},
-    {id:'thief',   ic:'🦹', nm:'Land Thief',    ds:'Steal 25% of the biggest player instantly.',      cost:3500},
-    {id:'quake',   ic:'🌋', nm:'Earthquake',    ds:'Everyone else loses their trail + 15% of land.',  cost:3000},
-    {id:'titan',   ic:'🗿', nm:'Titan',         ds:'3× size + 15s of being uncuttable.',              cost:2500},
-    {id:'empire',  ic:'🏯', nm:'Instant Empire',ds:'Spawn a giant block of territory around you.',     cost:2200},
-    {id:'freeze',  ic:'❄️', nm:'Freeze Ray',    ds:'All bots freeze for 8 seconds.',                  cost:1800},
-    {id:'phantom', ic:'🌫️', nm:'Phantom',       ds:'Your trail goes faint for 12 seconds.',           cost:1500},
-    {id:'surge',   ic:'💎', nm:'Magnet Surge',  ds:'Triple all coins for the rest of the match.',      cost:1200},
-    {id:'grand',   ic:'🪙', nm:'Grand Payout',  ds:'Instantly gain 1,000 coins.',                     cost:1000},
+    {id:'god',     ic:'😇', nm:'Full God',      ds:'Swap your land with the #1 player. Take it all.', cost:10000},
+    {id:'mach',    ic:'🚀', nm:'Mach Speed',    ds:'3× speed for 20 seconds.',                        cost:8000},
+    {id:'thief',   ic:'🦹', nm:'Land Thief',    ds:'Steal 25% of the biggest player instantly.',      cost:7000},
+    {id:'quake',   ic:'🌋', nm:'Earthquake',    ds:'Everyone else loses their trail + 15% of land.',  cost:6000},
+    {id:'titan',   ic:'🗿', nm:'Titan',         ds:'3× size + 15s of being uncuttable.',              cost:5000},
+    {id:'empire',  ic:'🏯', nm:'Instant Empire',ds:'Spawn a giant block of territory around you.',     cost:4500},
+    {id:'freeze',  ic:'❄️', nm:'Freeze Ray',    ds:'Freezes EVERYONE else for 8 seconds.',            cost:3800},
+    {id:'phantom', ic:'🌫️', nm:'Phantom',       ds:'Your trail goes faint for 12 seconds.',           cost:3200},
+    {id:'surge',   ic:'💎', nm:'Magnet Surge',  ds:'Triple all coins for the rest of the match.',      cost:2500},
+    {id:'grand',   ic:'🪙', nm:'Grand Payout',  ds:'Instantly gain 1,000 coins.',                     cost:2000},
   ];
 
   function loadStore(){
@@ -423,6 +448,7 @@
 
   // server state (latest snapshot)
   let owner = null, trail = null;      // Uint8Array, decoded from RLE
+  let blocked = null;                  // void cells for the current map shape
   let ents = new Map();                // id -> {x,y,h,color,name,area,outside,bot,dead}
   // smoothed render state per entity (interpolation toward server pos)
   let view = new Map();                // id -> {x,y}
@@ -471,24 +497,27 @@
     ws.onerror = () => { statusEl.textContent='connection error'; };
     ws.onmessage = (ev) => {
       const m = JSON.parse(ev.data);
+      if (m.t==='nameReject'){ onNameReject(m.message); return; }
       if (m.t==='welcome'){ myId=m.id; GW=m.w; GH=m.h; activeMode=m.mode||selectedMode;
         boostMs=m.boostMs||10000; cooldownMs=m.cooldownMs||10000;
+        blocked = m.blocked ? rleDecode(m.blocked, GW*GH) : null;
         hud.classList.remove('hidden'); joinScreen.classList.add('hidden'); closeModals(); statusEl.textContent='';
         document.getElementById('chatToggle').classList.remove('hidden');
         document.getElementById('boostWrap').classList.toggle('hidden', !hasBoost);
         cheatSurge=false; renderCheatBar();
         document.getElementById('boardTitle').textContent = activeMode==='br' ? 'Survivors' : 'Leaderboard';
         document.getElementById('myStatLab').textContent = activeMode==='br' ? 'territory · 1 life' : 'your territory';
-        // rich-start power-up grants bonus coins on join
         if (store.equip.includes('rich')){ addCoins(100); flashCoins('+100 rich start'); }
+        playMapIntro(m.mapName||'The Arena', false);   // "Starting match" intro
       }
       else if (m.t==='full'){ statusEl.textContent='world is full — try again shortly'; }
       else if (m.t==='state'){ applyState(m); }
       else if (m.t==='death'){ onDeath(m.reason, m.killerId, m.eliminated, m.placement); }
       else if (m.t==='respawn'){ onRespawn(); }
-      else if (m.t==='cut'){ onCut(m.by); }
-      else if (m.t==='roundreset'){ onRoundReset(m.winner); }
-      else if (m.t==='kill'){ const c=Math.round((m.coins||20)*coinMult); addCoins(c); flashCoins('+'+c); }
+      else if (m.t==='booted'){ onBooted(m.by); }
+      else if (m.t==='roundreset'){ if(m.blocked) blocked=rleDecode(m.blocked, GW*GH); onRoundReset(m.winner, m.mapName); }
+      else if (m.t==='kill'){ const base=(m.coins||20); const c=Math.round(base*coinMult); addCoins(c);
+        flashCoins('+'+c + (m.mult>1?(' · x'+m.mult+' streak!'):'')); }
       else if (m.t==='fullmap'){ const c=Math.round((m.coins||1000)*coinMult); addCoins(c); flashCoins('+'+c+' 100%!'); }
       else if (m.t==='chat'){ addChat(m.name, m.color, m.text); }
     };
@@ -577,15 +606,26 @@
   }
   function onRespawn(){ isDead=false; spectateId=null; deathScreen.classList.add('hidden'); }
 
-  // Classic: got cut but kept playing with a fresh beginner plot — quick banner.
-  function onCut(by){
-    isDead=false; spectateId=null; deathScreen.classList.add('hidden');
-    flashBanner(by ? ('✂️ Cut by '+by+' — fresh start!') : '✂️ You were cut — fresh start!', '#ff7a7a');
+  // Sent to the main menu after being cut 3× by the same player (Classic).
+  function onBooted(by){
+    flashBanner('☠️ '+(by||'Someone')+' eliminated you 3 times — back to menu', '#ff7a7a');
+    setTimeout(goHome, 1200);
   }
-  // Someone hit 100% — the whole map reset.
-  function onRoundReset(winner){
+  // Name rejected at join — show the message, let them retry.
+  function onNameReject(message){
+    connected=false; try{ws&&ws.close();}catch(_){ } ws=null;
+    const ni=document.getElementById('nameInput');
+    statusEl.textContent='';
+    ni.classList.add('reject');
+    flashBanner('⛔ '+(message||'Name not allowed. Try another.'), '#ff7a7a');
+    setTimeout(()=>ni.classList.remove('reject'), 1500);
+    ni.focus(); ni.select();
+  }
+  // Someone hit 100% — the whole map reset with a new shape.
+  function onRoundReset(winner, mapName){
     isDead=false; spectateId=null; deathScreen.classList.add('hidden');
-    flashBanner('👑 '+(winner||'Someone')+' took the whole map! New round.', '#ffd23f');
+    flashBanner('👑 '+(winner||'Someone')+' conquered the map!', '#ffd23f');
+    playMapIntro(mapName||'New Map', true);
   }
   // generic center banner
   let bannerTimer=null;
@@ -598,6 +638,34 @@
       document.body.appendChild(el); }
     el.textContent=text; el.style.borderLeft='4px solid '+(color||'#ffd23f'); el.style.opacity='1';
     clearTimeout(bannerTimer); bannerTimer=setTimeout(()=>{el.style.opacity='0';},2200);
+  }
+
+  // ---- MAP INTRO: "Starting match" -> map name -> top-view flyover ----
+  function playMapIntro(mapName, isNewRound){
+    const ov=document.getElementById('mapIntro');
+    const t1=document.getElementById('miStarting');
+    const t2=document.getElementById('miName');
+    t1.textContent = isNewRound ? 'New Round' : 'Starting match';
+    t2.textContent = mapName;
+    ov.classList.remove('hidden');
+    ov.classList.add('show');
+    // draw a top-view of the whole map onto the intro canvas
+    drawMapPreview();
+    setTimeout(()=>{ ov.classList.remove('show'); }, 2600);
+    setTimeout(()=>{ ov.classList.add('hidden'); }, 3100);
+  }
+  function drawMapPreview(){
+    const c=document.getElementById('miCanvas'); if(!c||!blocked) return;
+    const S=220; c.width=S; c.height=S; const g=c.getContext('2d');
+    g.clearRect(0,0,S,S);
+    const sx=S/GW, sy=S/GH;
+    // playable area in light, void in dark
+    g.fillStyle='#243d38'; g.fillRect(0,0,S,S);
+    g.fillStyle='#fbf9f3';
+    for(let y=0;y<GH;y+=2)for(let x=0;x<GW;x+=2){
+      if(blocked[y*GW+x]===0) g.fillRect(x*sx,y*sy,sx*2,sy*2);
+    }
+    g.strokeStyle='#ffd23f'; g.lineWidth=3; g.strokeRect(2,2,S-4,S-4);
   }
 
   // ---- RENDER ----
@@ -640,9 +708,16 @@
     for(let y=y0;y<=y1+1;y++){const sy=oy+y*cs;ctx.moveTo(ox+x0*cs,sy);ctx.lineTo(ox+(x1+1)*cs,sy);}
     ctx.stroke();
 
-    // --- territory drop shadow pass (gives the slightly-3D "paper cutout" look)
-    // Draw every owned cell offset down-right in soft dark; the fill pass on top
-    // then sits "above" it.
+    // --- void cells (outside the current map shape) ---
+    if(blocked){
+      ctx.fillStyle='#243d38';
+      for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){
+        if(blocked[y*GW+x]===1) ctx.fillRect(ox+x*cs, oy+y*cs, cs+1, cs+1);
+      }
+    }
+
+
+    // --- territory drop shadow pass (slightly-3D paper cutout look) ---
     ctx.save();
     ctx.fillStyle='rgba(70,60,45,0.18)';
     const sh=Math.max(2,cs*0.16);

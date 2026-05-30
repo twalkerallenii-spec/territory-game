@@ -43,10 +43,63 @@ const PALETTE = [
 
 // ---- WORLD STATE -----------------------------------------------------------
 // owner: 0 = neutral, else entity id. trail: 0 = none, else entity id.
+// blocked: 1 = unplayable cell (void/wall) for the current map shape.
 const owner = new Uint8Array(GRID_W * GRID_H);
 const trail = new Uint8Array(GRID_W * GRID_H);
+const blocked = new Uint8Array(GRID_W * GRID_H);
 const idx = (x, y) => y * GRID_W + x;
-const inBounds = (x, y) => x >= 0 && y >= 0 && x < GRID_W && y < GRID_H;
+const inBoundsRaw = (x, y) => x >= 0 && y >= 0 && x < GRID_W && y < GRID_H;
+// "in bounds" now also means "not a blocked void cell" — avatars slide off these
+// just like the map border.
+const inBounds = (x, y) => inBoundsRaw(x, y) && blocked[idx(x, y)] === 0;
+
+// ---- MAP SHAPES ------------------------------------------------------------
+// Each shape fills `blocked` so only the playable region is open. Returns name.
+const MAP_SHAPES = [
+  { id:'square',  name:'The Arena',     fn:()=>{} },                          // full square
+  { id:'circle',  name:'The Colosseum', fn:shapeCircle },
+  { id:'diamond', name:'The Diamond',   fn:shapeDiamond },
+  { id:'cross',   name:'The Crossroads',fn:shapeCross },
+  { id:'donut',   name:'The Ring',      fn:shapeDonut },
+  { id:'plus',    name:'The Plus',      fn:shapePlus },
+];
+let currentMap = MAP_SHAPES[0];
+
+function clearBlocked(){ blocked.fill(0); }
+function shapeCircle(){
+  const cx=GRID_W/2, cy=GRID_H/2, R=Math.min(GRID_W,GRID_H)/2 - 2;
+  for(let y=0;y<GRID_H;y++)for(let x=0;x<GRID_W;x++){
+    const dx=x-cx+0.5, dy=y-cy+0.5; if(dx*dx+dy*dy > R*R) blocked[idx(x,y)]=1;
+  }
+}
+function shapeDiamond(){
+  const cx=GRID_W/2, cy=GRID_H/2, R=Math.min(GRID_W,GRID_H)/2 - 2;
+  for(let y=0;y<GRID_H;y++)for(let x=0;x<GRID_W;x++){
+    if(Math.abs(x-cx+0.5)+Math.abs(y-cy+0.5) > R) blocked[idx(x,y)]=1;
+  }
+}
+function shapeCross(){
+  const armW = GRID_W*0.32;
+  for(let y=0;y<GRID_H;y++)for(let x=0;x<GRID_W;x++){
+    const inV = Math.abs(x-GRID_W/2) < armW/1;
+    const inH = Math.abs(y-GRID_H/2) < armW/1;
+    if(!inV && !inH) blocked[idx(x,y)]=1;
+  }
+}
+function shapePlus(){ shapeCross(); }  // alias styling
+function shapeDonut(){
+  const cx=GRID_W/2, cy=GRID_H/2, R=Math.min(GRID_W,GRID_H)/2 - 2, r=R*0.34;
+  for(let y=0;y<GRID_H;y++)for(let x=0;x<GRID_W;x++){
+    const dx=x-cx+0.5, dy=y-cy+0.5, d=dx*dx+dy*dy;
+    if(d > R*R || d < r*r) blocked[idx(x,y)]=1;
+  }
+}
+function applyMapShape(shape){
+  currentMap = shape;
+  clearBlocked();
+  shape.fn();
+}
+
 
 const DIRS = { N: [0, -1], E: [1, 0], S: [0, 1], W: [-1, 0] };
 const OPP = { N: 'S', S: 'N', E: 'W', W: 'E' };
@@ -155,6 +208,47 @@ function nextBotName() {
   return BOT_NAMES[(botNameCursor++) % BOT_NAMES.length];
 }
 
+// Normalize a name for comparison: lowercase, map common leetspeak to letters,
+// strip non-alphanumerics. Used for both similarity and profanity checks.
+function normalizeName(s) {
+  return ('' + s).toLowerCase()
+    .replace(/[4@]/g, 'a').replace(/[3]/g, 'e').replace(/[1!|]/g, 'i')
+    .replace(/[0]/g, 'o').replace(/[5\$]/g, 's').replace(/[7]/g, 't')
+    .replace(/[^a-z0-9]/g, '');
+}
+
+// Small PG profanity list (kept conservative; matches as substring of the
+// normalized name so leetspoofing is caught).
+const BANNED = ['fuck','shit','bitch','cunt','nigger','nigga','faggot','dick',
+  'pussy','asshole','bastard','whore','slut','rape','nazi','penis','vagina',
+  'sex','cum','porn','retard','damn','crap'];
+
+function validateName(raw) {
+  const trimmed = ('' + raw).trim();
+  if (trimmed.length < 1) return { ok:false, reason:'empty', message:'Please enter a name.' };
+  const norm = normalizeName(trimmed);
+  if (norm.length < 1) return { ok:false, reason:'empty', message:'Please enter a real name.' };
+  // profanity
+  for (const w of BANNED) {
+    if (norm.includes(w)) return { ok:false, reason:'inappropriate',
+      message:'That name isn\u2019t allowed. Please choose something appropriate.' };
+  }
+  // duplicate / confusingly-similar to any LIVE entity (humans and bots)
+  for (const e of entities.values()) {
+    if (e.dead) continue;
+    const other = normalizeName(e.name);
+    if (other === norm) return { ok:false, reason:'duplicate',
+      message:'That name is already taken. Try a different one.' };
+    // confusingly similar: one contains the other and they're close in length
+    if ((other.includes(norm) || norm.includes(other)) &&
+        Math.abs(other.length - norm.length) <= 1 && Math.min(other.length, norm.length) >= 3) {
+      return { ok:false, reason:'similar',
+        message:'That name is too similar to another player. Try a different one.' };
+    }
+  }
+  return { ok:true };
+}
+
 // Power-up effects the server enforces. Loadout comes from the client on join;
 // validated against this whitelist so a hacked client can't invent effects.
 // 'boost' is the rechargeable active speed boost (tap to use). Others are passive.
@@ -259,20 +353,32 @@ function killEntity(e, reason, killer) {
   if (e.shieldUntil && Date.now() < e.shieldUntil && reason !== 'self') return;
 
   e.dead = true;
-  // Battle-royale: one life. Mark eliminated so the player can't respawn.
   if (e.mode === 'br') e.eliminated = true;
   e.respawnAt = Date.now() + (e.isBot ? BOT_RESPAWN_MS : PLAYER_MIN_DEAD_MS);
   e.killerId = (killer && killer.id !== e.id) ? killer.id : 0;
   e.boosting = false;
+  e.streak = 0;  // dying resets your own kill streak
 
   clearTrail(e);
   const stolen = killer && killer.id !== e.id && !killer.dead;
+  let bootToMenu = false;
   if (stolen) {
     transferTerritory(e.id, killer.id);
     recomputeArea(killer);
     killer.kills = (killer.kills || 0) + 1;
+    // kill streak: consecutive kills without dying -> escalating coin multiplier
+    killer.streak = (killer.streak || 0) + 1;
+    const streakMult = Math.min(5, killer.streak);   // x1..x5
+    const coins = COIN_PER_KILL * streakMult;
     if (!killer.isBot && killer.ws && killer.ws.readyState === 1) {
-      send(killer.ws, { t: 'kill', coins: COIN_PER_KILL, total: killer.kills });
+      send(killer.ws, { t: 'kill', coins, total: killer.kills, streak: killer.streak, mult: streakMult });
+    }
+    // 3-kills-to-menu (Classic only): if this killer has now cut THIS victim 3+
+    // times, the victim is sent back to the main menu.
+    if (e.mode !== 'br' && !e.isBot) {
+      e.deathsBy = e.deathsBy || {};
+      e.deathsBy[killer.id] = (e.deathsBy[killer.id] || 0) + 1;
+      if (e.deathsBy[killer.id] >= 3) bootToMenu = true;
     }
   } else {
     releaseTerritory(e);
@@ -280,18 +386,22 @@ function killEntity(e, reason, killer) {
   e.area = 0;
 
   if (e.mode === 'br') {
-    // Battle Royale: you're out. Full death/spectate + placement.
     if (e.ws && e.ws.readyState === 1) {
       send(e.ws, { t: 'death', reason, killerId: e.killerId, eliminated: true,
                    placement: brPlacement() });
     }
-  } else {
-    // Classic: you lose your land but immediately get a fresh beginner plot and
-    // keep playing — a quick "you got cut" notice, no spectate screen.
+  } else if (bootToMenu) {
+    // Sent home: tell the client to return to menu, then remove the entity.
     if (e.ws && e.ws.readyState === 1) {
-      send(e.ws, { t: 'cut', by: killer && killer.id !== e.id ? killer.name : null, reason });
+      send(e.ws, { t: 'booted', by: killer ? killer.name : null });
     }
-    respawnEntity(e);
+    // entity will be cleaned up when its socket closes / on next join; mark it.
+    e.eliminated = true;
+  } else {
+    // Classic death: spectate your killer, press Space to rejoin (no auto respawn).
+    if (e.ws && e.ws.readyState === 1) {
+      send(e.ws, { t: 'death', reason, killerId: e.killerId, eliminated: false, placement: 0 });
+    }
   }
 }
 
@@ -384,7 +494,9 @@ function captureTerritory(e) {
 
   // ROUND WIN: dominating the map (≈100%) wipes the board and restarts everyone
   // fresh. The winner gets the big coin reward.
-  const total = GRID_W * GRID_H;
+  // count only PLAYABLE cells (blocked void cells can never be owned)
+  let total = 0;
+  for (let i = 0; i < blocked.length; i++) if (blocked[i] === 0) total++;
   if (e.area >= total * 0.99 && !roundResetting) {
     if (!e.isBot && e.ws && e.ws.readyState === 1) {
       send(e.ws, { t: 'fullmap', coins: COIN_FULL_MAP });
@@ -399,16 +511,15 @@ function roundReset(winner) {
   roundResetting = true;
   owner.fill(0);
   trail.fill(0);
+  // pick a new random map shape for the next round
+  const shape = MAP_SHAPES[(Math.random() * MAP_SHAPES.length) | 0];
+  applyMapShape(shape);
   const winnerName = winner ? winner.name : 'Someone';
   for (const ent of entities.values()) {
     ent.trailCells.length = 0;
     ent.isOutside = false;
     ent._gotFullMap = false;
     ent._frac = 0;
-    if (ent.mode === 'br') {
-      // In BR a 100% means the round is over — that player wins; others stay out.
-      if (ent === winner) { /* keep */ }
-    }
     if (!ent.dead) {
       const { cx, cy } = findSpawn(ent.id, ent.blob);
       ent.cx = cx; ent.cy = cy; ent.px = cx + 0.5; ent.py = cy + 0.5;
@@ -417,7 +528,8 @@ function roundReset(winner) {
       paintSpawnBlob(ent); recomputeArea(ent);
     }
     if (!ent.isBot && ent.ws && ent.ws.readyState === 1) {
-      send(ent.ws, { t: 'roundreset', winner: winnerName });
+      send(ent.ws, { t: 'roundreset', winner: winnerName, mapId: shape.id, mapName: shape.name,
+                     blocked: rleEncode(blocked) });
     }
   }
   roundResetting = false;
@@ -495,8 +607,9 @@ function applyCheat(e, id) {
       recomputeArea(e);
       return true;
     }
-    case 'freeze': {                    // freeze all bots for 8s
-      botFreezeUntil = now + 8000;
+    case 'freeze': {                    // freeze EVERYONE else for 8s
+      freezeUntil = now + 8000;
+      freezeCasterId = e.id;
       return true;
     }
     case 'phantom': {                   // your trail invisible to others 12s
@@ -513,7 +626,7 @@ function applyCheat(e, id) {
   return false;
 }
 
-let botFreezeUntil = 0;
+let freezeUntil = 0, freezeCasterId = 0;
 
 // ---- LOGICAL STEP into a new cell (Blueprint Sec 3A) -----------------------
 function enterCell(e, x, y) {
@@ -754,9 +867,9 @@ function tick() {
     if (e.dead && e.isBot && e.eliminated && now >= e.respawnAt) { entities.delete(e.id); }
   }
 
-  const botsFrozen = now < botFreezeUntil;
-  for (const e of entities.values()) if (e.isBot && !e.dead && !botsFrozen) botThink(e);
-  for (const e of entities.values()) { if (e.isBot && botsFrozen) continue; advance(e); }
+  const frozen = now < freezeUntil;
+  for (const e of entities.values()) if (e.isBot && !e.dead && !(frozen && e.id !== freezeCasterId)) botThink(e);
+  for (const e of entities.values()) { if (frozen && e.id !== freezeCasterId) continue; advance(e); }
 
   maintainBots();
   broadcastState();
@@ -833,6 +946,55 @@ const BOT_COMEBACKS = [
   ()=>`I've eaten players ranked higher than you for breakfast.`,
   ()=>`That's adorable. Anyway — back to winning.`,
   ()=>`Say less. Actually, say nothing. You're embarrassing yourself.`,
+  ()=>`Is that your strategy or your apology?`,
+  ()=>`I've seen smarter trails drawn by a sleeping bot.`,
+  ()=>`You play like the tutorial gave up on you.`,
+  ()=>`Keep dreaming, I'll keep capturing.`,
+  ()=>`Your territory called. It wants a real owner.`,
+  ()=>`I'd explain how to win but you wouldn't fit it on your map.`,
+  ()=>`Nice loop. Shame it's about to be mine.`,
+  ()=>`You bring a marker to a land war?`,
+  ()=>`Blink and your whole map is gone.`,
+  ()=>`Talking trash with 2% of the board, bold move.`,
+  ()=>`I almost feel bad. Almost.`,
+  ()=>`Your trail is the easiest snack on this map.`,
+  ()=>`Did you come here to lose in chat too?`,
+  ()=>`That confidence is cute for someone in last place.`,
+  ()=>`I've turned bigger players into rubble.`,
+  ()=>`Run home. Oh wait, you don't have one anymore.`,
+  ()=>`You're the reason the tutorial exists.`,
+  ()=>`Squares like you are why I never lose.`,
+  ()=>`Keep typing, it makes you easier to corner.`,
+  ()=>`I collect territories. Yours is next on the shelf.`,
+  ()=>`That's a lot of mouth for a one-cell kingdom.`,
+  ()=>`You move like you're apologizing to the grid.`,
+  ()=>`Adorable. Now watch a pro draw a real loop.`,
+  ()=>`I'd race you but I don't race snails.`,
+  ()=>`Your whole empire fits in my shadow.`,
+  ()=>`Less chatting, more getting captured.`,
+  ()=>`You call that a trail? I call it bait.`,
+  ()=>`Even the walls feel sorry for you.`,
+  ()=>`I've respawned with more land than you'll ever hold.`,
+  ()=>`Keep it up and I'll frame your tiny map.`,
+  ()=>`You're playing checkers. I'm drawing masterpieces.`,
+  ()=>`Cut once, shame on me. Cut you thrice, see you in the menu.`,
+  ()=>`That's a brave thing to say to your future landlord.`,
+  ()=>`I'd take you seriously but the leaderboard won't let me.`,
+  ()=>`You steer like the arrow keys owe you money.`,
+  ()=>`The map's not big enough for your ego or small enough for your skill.`,
+  ()=>`Careful, all that talk is slowing your turns.`,
+  ()=>`I've already forgotten your name. The board will too.`,
+  ()=>`Your strategy is my warm-up.`,
+  ()=>`Trash talk costs nothing. Your territory, though — expensive.`,
+  ()=>`Keep poking the bear. The bear owns the whole map.`,
+  ()=>`You had one trail and you fumbled it.`,
+  ()=>`I'd give you a head start but you'd waste it.`,
+  ()=>`Aw, the little square has opinions.`,
+  ()=>`Welcome to the food chain. You're at the bottom.`,
+  ()=>`Spectator mode is calling your name.`,
+  ()=>`I've seen bolder moves from a frozen bot.`,
+  ()=>`Your loops are rounder than your chances.`,
+  ()=>`Talk all you want — I read it from inside your old territory.`,
 ];
 function maybeBotReply(text) {
   const lower = text.toLowerCase();
@@ -863,12 +1025,19 @@ wss.on('connection', (ws) => {
     try { m = JSON.parse(raw); } catch (_) { return; }
 
     if (m.t === 'join') {
-      const name = ('' + (m.name || 'Player')).slice(0, 16) || 'Player';
-      player = spawnEntity({ isBot: false, name, loadout: m.loadout, mode: m.mode });
+      if (player) return;  // already joined
+      const raw = ('' + (m.name || 'Player')).slice(0, 16).trim();
+      const verdict = validateName(raw);
+      if (!verdict.ok) {
+        send(ws, { t: 'nameReject', reason: verdict.reason, message: verdict.message });
+        return;
+      }
+      player = spawnEntity({ isBot: false, name: raw || 'Player', loadout: m.loadout, mode: m.mode });
       player.ws = ws;
       player.skin = (typeof m.skin === 'string') ? m.skin.slice(0, 24) : 'default';
       send(ws, { t: 'welcome', id: player.id, w: GRID_W, h: GRID_H, loadout: player.loadout,
-                 boostMs: BOOST_DURATION_MS, cooldownMs: BOOST_COOLDOWN_MS, mode: player.mode });
+                 boostMs: BOOST_DURATION_MS, cooldownMs: BOOST_COOLDOWN_MS, mode: player.mode,
+                 mapId: currentMap.id, mapName: currentMap.name, blocked: rleEncode(blocked) });
     } else if (m.t === 'turn' && player && !player.dead) {
       if (['N', 'E', 'S', 'W'].includes(m.d)) player.pendingTurn = m.d;  // intent only
     } else if (m.t === 'boost' && player && !player.dead && player.hasBoost) {
