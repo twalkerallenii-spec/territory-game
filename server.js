@@ -54,46 +54,62 @@ const inBoundsRaw = (x, y) => x >= 0 && y >= 0 && x < GRID_W && y < GRID_H;
 const inBounds = (x, y) => inBoundsRaw(x, y) && blocked[idx(x, y)] === 0;
 
 // ---- MAP SHAPES ------------------------------------------------------------
-// Each shape fills `blocked` so only the playable region is open. Returns name.
+// Three worlds only, all with soft/rounded edges (no harsh corners or corridors).
+// Each shape fills `blocked` so only the playable region is open.
 const MAP_SHAPES = [
-  { id:'square',  name:'The Arena',     fn:()=>{} },                          // full square
-  { id:'circle',  name:'The Colosseum', fn:shapeCircle },
-  { id:'diamond', name:'The Diamond',   fn:shapeDiamond },
-  { id:'cross',   name:'The Crossroads',fn:shapeCross },
-  { id:'donut',   name:'The Ring',      fn:shapeDonut },
-  { id:'plus',    name:'The Plus',      fn:shapePlus },
+  { id:'circle',   name:'The Colosseum', fn:shapeCircle },
+  { id:'square',   name:'The Arena',     fn:shapeRoundedSquare },
+  { id:'triangle', name:'The Pyramid',   fn:shapeRoundedTriangle },
 ];
 let currentMap = MAP_SHAPES[0];
 
 function clearBlocked(){ blocked.fill(0); }
+
 function shapeCircle(){
-  const cx=GRID_W/2, cy=GRID_H/2, R=Math.min(GRID_W,GRID_H)/2 - 2;
+  const cx=GRID_W/2, cy=GRID_H/2, R=Math.min(GRID_W,GRID_H)/2 - 3;
   for(let y=0;y<GRID_H;y++)for(let x=0;x<GRID_W;x++){
     const dx=x-cx+0.5, dy=y-cy+0.5; if(dx*dx+dy*dy > R*R) blocked[idx(x,y)]=1;
   }
 }
-function shapeDiamond(){
-  const cx=GRID_W/2, cy=GRID_H/2, R=Math.min(GRID_W,GRID_H)/2 - 2;
+
+// Square with generously rounded corners (a "squircle"-style rounded rect).
+function shapeRoundedSquare(){
+  const m=4;                                   // margin from the map edge
+  const x0=m, y0=m, x1=GRID_W-1-m, y1=GRID_H-1-m;
+  const r=Math.min(GRID_W,GRID_H)*0.22;        // corner radius
   for(let y=0;y<GRID_H;y++)for(let x=0;x<GRID_W;x++){
-    if(Math.abs(x-cx+0.5)+Math.abs(y-cy+0.5) > R) blocked[idx(x,y)]=1;
+    let bad = (x<x0||x>x1||y<y0||y>y1);
+    if(!bad){
+      // round each corner: if we're in a corner box, require distance<=r
+      const inLeft=x<x0+r, inRight=x>x1-r, inTop=y<y0+r, inBot=y>y1-r;
+      if((inLeft||inRight)&&(inTop||inBot)){
+        const ccx = inLeft ? x0+r : x1-r;
+        const ccy = inTop  ? y0+r : y1-r;
+        const dx=x-ccx, dy=y-ccy;
+        if(dx*dx+dy*dy > r*r) bad=true;
+      }
+    }
+    if(bad) blocked[idx(x,y)]=1;
   }
 }
-function shapeCross(){
-  const armW = GRID_W*0.32;
+
+// Equilateral-ish triangle (point up) with rounded corners via a small inward
+// inset: a cell is playable if it's inside all three edges by a soft margin.
+function shapeRoundedTriangle(){
+  const cx=GRID_W/2, top=5, bot=GRID_H-6;
+  const halfBase=(GRID_W/2)-4;
+  const ax=cx, ay=top, bx=cx-halfBase, by=bot, cxr=cx+halfBase, cyr=bot;
+  const soft=10;   // inward inset that rounds the three corners (tuned for size)
+  function sideSign(px,py, x1,y1,x2,y2){ return (x2-x1)*(py-y1)-(y2-y1)*(px-x1); }
   for(let y=0;y<GRID_H;y++)for(let x=0;x<GRID_W;x++){
-    const inV = Math.abs(x-GRID_W/2) < armW/1;
-    const inH = Math.abs(y-GRID_H/2) < armW/1;
-    if(!inV && !inH) blocked[idx(x,y)]=1;
+    const d1=sideSign(x,y, ax,ay, bx,by);
+    const d2=sideSign(x,y, bx,by, cxr,cyr);
+    const d3=sideSign(x,y, cxr,cyr, ax,ay);
+    const inside = (d1<=-soft) && (d2<=-soft) && (d3<=-soft);
+    if(!inside) blocked[idx(x,y)]=1;
   }
 }
-function shapePlus(){ shapeCross(); }  // alias styling
-function shapeDonut(){
-  const cx=GRID_W/2, cy=GRID_H/2, R=Math.min(GRID_W,GRID_H)/2 - 2, r=R*0.34;
-  for(let y=0;y<GRID_H;y++)for(let x=0;x<GRID_W;x++){
-    const dx=x-cx+0.5, dy=y-cy+0.5, d=dx*dx+dy*dy;
-    if(d > R*R || d < r*r) blocked[idx(x,y)]=1;
-  }
-}
+
 function applyMapShape(shape){
   currentMap = shape;
   clearBlocked();
