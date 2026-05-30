@@ -96,10 +96,12 @@ function shapeRoundedSquare(){
 // Equilateral-ish triangle (point up) with rounded corners via a small inward
 // inset: a cell is playable if it's inside all three edges by a soft margin.
 function shapeRoundedTriangle(){
-  const cx=GRID_W/2, top=5, bot=GRID_H-6;
-  const halfBase=(GRID_W/2)-4;
+  // Wide 3-point triangle: apex near top-center, base corners near bottom-left
+  // and bottom-right, so all three points reach out toward the map corners.
+  const cx=GRID_W/2, top=4, bot=GRID_H-5;
+  const halfBase=(GRID_W/2)-3;
   const ax=cx, ay=top, bx=cx-halfBase, by=bot, cxr=cx+halfBase, cyr=bot;
-  const soft=10;   // inward inset that rounds the three corners (tuned for size)
+  const soft=4;   // small inward inset so the edge isn't right on the border
   function sideSign(px,py, x1,y1,x2,y2){ return (x2-x1)*(py-y1)-(y2-y1)*(px-x1); }
   for(let y=0;y<GRID_H;y++)for(let x=0;x<GRID_W;x++){
     const d1=sideSign(x,y, ax,ay, bx,by);
@@ -108,6 +110,22 @@ function shapeRoundedTriangle(){
     const inside = (d1<=-soft) && (d2<=-soft) && (d3<=-soft);
     if(!inside) blocked[idx(x,y)]=1;
   }
+}
+
+// Expose the current map's smooth outline (in cell coords) so the client can
+// draw a clean anti-aliased boundary over the gridded play area.
+function mapOutline(){
+  const cx=GRID_W/2, cy=GRID_H/2;
+  if(currentMap.id==='circle'){
+    return { kind:'circle', cx, cy, r:Math.min(GRID_W,GRID_H)/2 - 3 };
+  }
+  if(currentMap.id==='triangle'){
+    const top=4, bot=GRID_H-5, halfBase=(GRID_W/2)-3;
+    return { kind:'poly', pts:[[cx,top],[cx-halfBase,bot],[cx+halfBase,bot]] };
+  }
+  // square (rounded)
+  const m=4, r=Math.min(GRID_W,GRID_H)*0.22;
+  return { kind:'rrect', x0:m, y0:m, x1:GRID_W-1-m, y1:GRID_H-1-m, r };
 }
 
 function applyMapShape(shape){
@@ -545,7 +563,7 @@ function roundReset(winner) {
     }
     if (!ent.isBot && ent.ws && ent.ws.readyState === 1) {
       send(ent.ws, { t: 'roundreset', winner: winnerName, mapId: shape.id, mapName: shape.name,
-                     blocked: rleEncode(blocked) });
+                     blocked: rleEncode(blocked), outline: mapOutline() });
     }
   }
   roundResetting = false;
@@ -1053,7 +1071,8 @@ wss.on('connection', (ws) => {
       player.skin = (typeof m.skin === 'string') ? m.skin.slice(0, 24) : 'default';
       send(ws, { t: 'welcome', id: player.id, w: GRID_W, h: GRID_H, loadout: player.loadout,
                  boostMs: BOOST_DURATION_MS, cooldownMs: BOOST_COOLDOWN_MS, mode: player.mode,
-                 mapId: currentMap.id, mapName: currentMap.name, blocked: rleEncode(blocked) });
+                 mapId: currentMap.id, mapName: currentMap.name, blocked: rleEncode(blocked),
+                 outline: mapOutline() });
     } else if (m.t === 'turn' && player && !player.dead) {
       if (['N', 'E', 'S', 'W'].includes(m.d)) player.pendingTurn = m.d;  // intent only
     } else if (m.t === 'boost' && player && !player.dead && player.hasBoost) {

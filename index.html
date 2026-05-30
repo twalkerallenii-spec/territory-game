@@ -449,6 +449,7 @@
   // server state (latest snapshot)
   let owner = null, trail = null;      // Uint8Array, decoded from RLE
   let blocked = null;                  // void cells for the current map shape
+  let mapOutline = null;               // smooth boundary {kind,...} for clean rendering
   let ents = new Map();                // id -> {x,y,h,color,name,area,outside,bot,dead}
   // smoothed render state per entity (interpolation toward server pos)
   let view = new Map();                // id -> {x,y}
@@ -501,6 +502,7 @@
       if (m.t==='welcome'){ myId=m.id; GW=m.w; GH=m.h; activeMode=m.mode||selectedMode;
         boostMs=m.boostMs||10000; cooldownMs=m.cooldownMs||10000;
         blocked = m.blocked ? rleDecode(m.blocked, GW*GH) : null;
+        mapOutline = m.outline || null;
         hud.classList.remove('hidden'); joinScreen.classList.add('hidden'); closeModals(); statusEl.textContent='';
         document.getElementById('chatToggle').classList.remove('hidden');
         document.getElementById('boostWrap').classList.toggle('hidden', !hasBoost);
@@ -515,7 +517,7 @@
       else if (m.t==='death'){ onDeath(m.reason, m.killerId, m.eliminated, m.placement); }
       else if (m.t==='respawn'){ onRespawn(); }
       else if (m.t==='booted'){ onBooted(m.by); }
-      else if (m.t==='roundreset'){ if(m.blocked) blocked=rleDecode(m.blocked, GW*GH); onRoundReset(m.winner, m.mapName); }
+      else if (m.t==='roundreset'){ if(m.blocked) blocked=rleDecode(m.blocked, GW*GH); if(m.outline) mapOutline=m.outline; onRoundReset(m.winner, m.mapName); }
       else if (m.t==='kill'){ const base=(m.coins||20); const c=Math.round(base*coinMult); addCoins(c);
         flashCoins('+'+c + (m.mult>1?(' · x'+m.mult+' streak!'):'')); }
       else if (m.t==='fullmap'){ const c=Math.round((m.coins||1000)*coinMult); addCoins(c); flashCoins('+'+c+' 100%!'); }
@@ -655,17 +657,26 @@
     setTimeout(()=>{ ov.classList.add('hidden'); }, 3100);
   }
   function drawMapPreview(){
-    const c=document.getElementById('miCanvas'); if(!c||!blocked) return;
+    const c=document.getElementById('miCanvas'); if(!c) return;
     const S=220; c.width=S; c.height=S; const g=c.getContext('2d');
     g.clearRect(0,0,S,S);
-    const sx=S/GW, sy=S/GH;
-    // playable area in light, void in dark
     g.fillStyle='#243d38'; g.fillRect(0,0,S,S);
-    g.fillStyle='#fbf9f3';
-    for(let y=0;y<GH;y+=2)for(let x=0;x<GW;x+=2){
-      if(blocked[y*GW+x]===0) g.fillRect(x*sx,y*sy,sx*2,sy*2);
+    if(!mapOutline){ // fallback: full square
+      g.fillStyle='#fbf9f3'; g.fillRect(6,6,S-12,S-12);
+    } else {
+      const sc=S/GW;  // assume square grid
+      g.save();
+      g.beginPath();
+      const o=mapOutline;
+      if(o.kind==='circle'){ g.arc(o.cx*sc,o.cy*sc,o.r*sc,0,Math.PI*2); }
+      else if(o.kind==='poly'){ const p=o.pts.map(([x,y])=>[x*sc,y*sc]);
+        g.moveTo(p[0][0],p[0][1]); for(let i=1;i<p.length;i++)g.lineTo(p[i][0],p[i][1]); g.closePath(); }
+      else { const x=o.x0*sc,y=o.y0*sc,w=(o.x1-o.x0)*sc,h=(o.y1-o.y0)*sc,r=o.r*sc,rr=Math.min(r,w/2,h/2);
+        g.moveTo(x+rr,y); g.arcTo(x+w,y,x+w,y+h,rr); g.arcTo(x+w,y+h,x,y+h,rr); g.arcTo(x,y+h,x,y,rr); g.arcTo(x,y,x+w,y,rr); g.closePath(); }
+      g.fillStyle='#fbf9f3'; g.fill();
+      g.strokeStyle='#ffd23f'; g.lineWidth=3; g.stroke();
+      g.restore();
     }
-    g.strokeStyle='#ffd23f'; g.lineWidth=3; g.strokeRect(2,2,S-4,S-4);
   }
 
   // ---- RENDER ----
@@ -708,8 +719,26 @@
     for(let y=y0;y<=y1+1;y++){const sy=oy+y*cs;ctx.moveTo(ox+x0*cs,sy);ctx.lineTo(ox+(x1+1)*cs,sy);}
     ctx.stroke();
 
-    // --- void cells (outside the current map shape) ---
-    if(blocked){
+    // --- void area (outside the map shape), drawn SMOOTH ---
+    // Instead of dark per-cell blocks (which look jagged), fill the whole map
+    // rect dark, then "cut out" the smooth play shape so its edge is clean.
+    if(blocked && mapOutline){
+      ctx.save();
+      // build a path = big rect MINUS the smooth shape, fill it dark (even-odd)
+      ctx.beginPath();
+      ctx.rect(ox-2, oy-2, GW*cs+4, GH*cs+4);     // outer (whole map)
+      traceOutline(ox, oy, cs);                    // inner (play shape)
+      ctx.fillStyle='#243d38';
+      ctx.fill('evenodd');                         // dark everywhere except the shape
+      ctx.restore();
+      // clean boundary line on the shape edge
+      ctx.save();
+      traceOutline(ox, oy, cs);
+      ctx.lineJoin='round'; ctx.lineCap='round';
+      ctx.strokeStyle='rgba(120,110,90,0.55)'; ctx.lineWidth=4; ctx.stroke();
+      ctx.strokeStyle='rgba(255,255,255,0.3)'; ctx.lineWidth=1.5; ctx.stroke();
+      ctx.restore();
+    } else if(blocked){
       ctx.fillStyle='#243d38';
       for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){
         if(blocked[y*GW+x]===1) ctx.fillRect(ox+x*cs, oy+y*cs, cs+1, cs+1);
@@ -878,6 +907,34 @@
     ctx.arcTo(x,y+h,x,y,r);
     ctx.arcTo(x,y,x+w,y,r);
     ctx.closePath();
+  }
+  // Path the current map's smooth outline in screen space (ox,oy = origin, cs = cell px).
+  function traceOutline(ox, oy, cs){
+    const o=mapOutline; if(!o) return;
+    const X=v=>ox+v*cs, Y=v=>oy+v*cs;
+    ctx.beginPath();
+    if(o.kind==='circle'){
+      ctx.arc(X(o.cx), Y(o.cy), o.r*cs, 0, Math.PI*2);
+    } else if(o.kind==='poly'){
+      // rounded-corner polygon using arcTo between vertices
+      const p=o.pts.map(([x,y])=>[X(x),Y(y)]);
+      const r=Math.min(GW,GH)*0.04*cs;  // small corner rounding
+      ctx.moveTo((p[0][0]+p[1][0])/2,(p[0][1]+p[1][1])/2);
+      for(let i=0;i<p.length;i++){
+        const cur=p[(i+1)%p.length], nxt=p[(i+2)%p.length];
+        ctx.arcTo(cur[0],cur[1], (cur[0]+nxt[0])/2,(cur[1]+nxt[1])/2, r);
+      }
+      ctx.closePath();
+    } else if(o.kind==='rrect'){
+      const x=X(o.x0), y=Y(o.y0), w=(o.x1-o.x0)*cs, h=(o.y1-o.y0)*cs, r=o.r*cs;
+      const rr=Math.min(r,w/2,h/2);
+      ctx.moveTo(x+rr,y);
+      ctx.arcTo(x+w,y,x+w,y+h,rr);
+      ctx.arcTo(x+w,y+h,x,y+h,rr);
+      ctx.arcTo(x,y+h,x,y,rr);
+      ctx.arcTo(x,y,x+w,y,rr);
+      ctx.closePath();
+    }
   }
   requestAnimationFrame(draw);
 
