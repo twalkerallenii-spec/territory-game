@@ -80,45 +80,46 @@ function distToNearestEnemy(cx, cy, selfId) {
   return best;
 }
 
+function blobNeutral(cx, cy, B, margin) {
+  const pad = B + (margin || 0);
+  for (let y = cy - pad; y <= cy + pad; y++)
+    for (let x = cx - pad; x <= cx + pad; x++)
+      if (!inBounds(x, y) || owner[idx(x, y)] !== 0) return false;
+  return true;
+}
+
 function findSpawn(selfId, blob) {
   const B = blob || SPAWN_BLOB;
   const M = 2;  // neutral margin around the spawn blob
-  for (let tries = 0; tries < 300; tries++) {
+
+  // Pass 1: random spots, fully neutral blob+margin AND far from enemies.
+  for (let tries = 0; tries < 400; tries++) {
     const cx = B + M + 1 + Math.floor(Math.random() * (GRID_W - 2 * (B + M) - 2));
     const cy = B + M + 1 + Math.floor(Math.random() * (GRID_H - 2 * (B + M) - 2));
-    // blob + margin must be entirely neutral (never spawn inside or touching land)
-    let ok = true;
-    for (let y = cy - B - M; y <= cy + B + M && ok; y++)
-      for (let x = cx - B - M; x <= cx + B + M; x++) {
-        if (!inBounds(x, y) || owner[idx(x, y)] !== 0) { ok = false; break; }
-      }
-    if (!ok) continue;
+    if (!blobNeutral(cx, cy, B, M)) continue;
     if (distToNearestEnemy(cx, cy, selfId) < SPAWN_SAFE_RADIUS) continue;
     return { cx, cy };
   }
-  // relaxed fallback 1: blob itself must be neutral (drop the safety radius)
+  // Pass 2: random spots, neutral blob (drop the safety radius).
   for (let tries = 0; tries < 400; tries++) {
     const cx = B + 1 + Math.floor(Math.random() * (GRID_W - 2 * B - 2));
     const cy = B + 1 + Math.floor(Math.random() * (GRID_H - 2 * B - 2));
-    let ok = true;
-    for (let y = cy - B; y <= cy + B && ok; y++)
-      for (let x = cx - B; x <= cx + B; x++)
-        if (!inBounds(x, y) || owner[idx(x, y)] !== 0) { ok = false; break; }
-    if (ok) return { cx, cy };
+    if (blobNeutral(cx, cy, B, 0)) return { cx, cy };
   }
-  // fallback 2: exhaustive scan for ANY fully-neutral blob (guarantees we never
-  // spawn inside someone's territory as long as one empty spot exists)
-  for (let cy = B + 1; cy < GRID_H - B - 1; cy++) {
-    for (let cx = B + 1; cx < GRID_W - B - 1; cx++) {
-      let ok = true;
-      for (let y = cy - B; y <= cy + B && ok; y++)
-        for (let x = cx - B; x <= cx + B; x++)
-          if (owner[idx(x, y)] !== 0) { ok = false; break; }
-      if (ok) return { cx, cy };
-    }
+  // Pass 3: gather ALL valid neutral spots and pick one at RANDOM (so a crowded
+  // map never funnels everyone to the same corner). Sample on a stride for speed.
+  const candidates = [];
+  const step = Math.max(1, B);  // don't need every single cell
+  for (let cy = B + 1; cy < GRID_H - B - 1; cy += step)
+    for (let cx = B + 1; cx < GRID_W - B - 1; cx += step)
+      if (blobNeutral(cx, cy, B, 0)) candidates.push([cx, cy]);
+  if (candidates.length) {
+    const [cx, cy] = candidates[(Math.random() * candidates.length) | 0];
+    return { cx, cy };
   }
-  // last resort (map essentially full): center, and clear a small patch
-  const cx = Math.floor(GRID_W / 2), cy = Math.floor(GRID_H / 2);
+  // Last resort (map essentially full): random-ish patch, cleared.
+  const cx = B + 1 + ((Math.random() * (GRID_W - 2 * B - 2)) | 0);
+  const cy = B + 1 + ((Math.random() * (GRID_H - 2 * B - 2)) | 0);
   for (let y = cy - B; y <= cy + B; y++)
     for (let x = cx - B; x <= cx + B; x++)
       if (inBounds(x, y)) owner[idx(x, y)] = 0;
@@ -779,10 +780,12 @@ function rleEncode(arr) {
 function broadcastState() {
   const ents = [];
   for (const e of entities.values()) {
+    // Skip dead entities entirely so no stale/ghost avatar lingers on clients.
+    if (e.dead) continue;
     ents.push({
       id: e.id, n: e.name, c: e.color, b: e.isBot ? 1 : 0,
       x: +e.px.toFixed(2), y: +e.py.toFixed(2), h: e.heading,
-      o: e.isOutside ? 1 : 0, a: e.area, d: e.dead ? 1 : 0,
+      o: e.isOutside ? 1 : 0, a: e.area, d: 0,
       k: e.killerId || 0,
       sz: (e.cheatSizeUntil && Date.now() < e.cheatSizeUntil ? (e.cheatSize||3) : (e.sizeMult || 1)),
       sk: e.skin || 'default',
