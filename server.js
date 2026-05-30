@@ -422,6 +422,98 @@ function roundReset(winner) {
   roundResetting = false;
 }
 
+// ---- CHEATS (consumable, server-enforced) ----------------------------------
+// The client has already verified the player owns/paid for the cheat (coins are
+// client-side for now). The server applies the actual world effect so it's real
+// in multiplayer. Validated against this whitelist.
+const CHEAT_IDS = ['god','mach','thief','quake','titan','empire','freeze','phantom','surge','grand'];
+
+function largestOtherEntity(selfId) {
+  let best = null;
+  for (const e of entities.values()) {
+    if (e.id === selfId || e.dead) continue;
+    if (!best || e.area > best.area) best = e;
+  }
+  return best;
+}
+
+function swapTerritories(aId, bId) {
+  for (let i = 0; i < owner.length; i++) {
+    if (owner[i] === aId) owner[i] = bId;
+    else if (owner[i] === bId) owner[i] = aId;
+  }
+}
+
+function applyCheat(e, id) {
+  if (!e || e.dead) return false;
+  const now = Date.now();
+  switch (id) {
+    case 'god': {                       // swap your land with the #1 player's
+      const top = largestOtherEntity(e.id);
+      if (!top) return false;
+      swapTerritories(e.id, top.id);
+      recomputeArea(e); recomputeArea(top);
+      return true;
+    }
+    case 'mach': {                      // 3x speed for 20s (separate from boost)
+      e.boosting = true; e.boostUntil = now + 20000; e.cheatSpeed = 3; e.cheatSpeedUntil = now + 20000;
+      return true;
+    }
+    case 'thief': {                     // steal 25% of the largest player's land
+      const top = largestOtherEntity(e.id);
+      if (!top) return false;
+      let moved = 0, target = Math.floor(top.area * 0.25);
+      for (let i = 0; i < owner.length && moved < target; i++) {
+        if (owner[i] === top.id) { owner[i] = e.id; moved++; }
+      }
+      recomputeArea(e); recomputeArea(top);
+      return true;
+    }
+    case 'quake': {                     // everyone else loses trail + 15% land
+      for (const o of entities.values()) {
+        if (o.id === e.id || o.dead) continue;
+        clearTrail(o);
+        let drop = Math.floor(o.area * 0.15), done = 0;
+        for (let i = 0; i < owner.length && done < drop; i++) {
+          if (owner[i] === o.id) { owner[i] = 0; done++; }
+        }
+        recomputeArea(o);
+      }
+      return true;
+    }
+    case 'titan': {                     // 3x size + 15s invulnerability
+      e.cheatSize = 3; e.cheatSizeUntil = now + 999999;  // persists this life
+      e.shieldUntil = Math.max(e.shieldUntil, now + 15000);
+      return true;
+    }
+    case 'empire': {                    // huge instant territory around you
+      const R = 12;
+      for (let y = e.cy - R; y <= e.cy + R; y++)
+        for (let x = e.cx - R; x <= e.cx + R; x++)
+          if (inBounds(x, y)) owner[idx(x, y)] = e.id;
+      recomputeArea(e);
+      return true;
+    }
+    case 'freeze': {                    // freeze all bots for 8s
+      botFreezeUntil = now + 8000;
+      return true;
+    }
+    case 'phantom': {                   // your trail invisible to others 12s
+      e.phantomUntil = now + 12000;
+      return true;
+    }
+    case 'surge': {                     // 3x coins rest of match (client multiplies)
+      return true;                      // effect is applied client-side on rewards
+    }
+    case 'grand': {                     // "grand" payout cheat — handled client-side
+      return true;
+    }
+  }
+  return false;
+}
+
+let botFreezeUntil = 0;
+
 // ---- LOGICAL STEP into a new cell (Blueprint Sec 3A) -----------------------
 function enterCell(e, x, y) {
   if (!inBounds(x, y)) { return; }   // wall is handled in advance() (slide, no death)
@@ -464,7 +556,9 @@ function advance(e) {
   if (e.dead) return;
 
   // distance to travel this tick, in cells (boost applies while active)
-  const mult = e.boosting ? BOOST_MULT : 1;
+  // boost or cheat speed; cheat mach-speed (3x) overrides normal boost
+  let mult = e.boosting ? BOOST_MULT : 1;
+  if (e.cheatSpeedUntil && Date.now() < e.cheatSpeedUntil) mult = Math.max(mult, e.cheatSpeed || 3);
   let remaining = CELL_PER_TICK * mult;
   // fractional position within the current cell, measured along heading
   e._frac = (e._frac || 0);
@@ -631,6 +725,7 @@ function respawnEntity(e) {
   e.pendingTurn = null; e.isOutside = false; e.trailCells.length = 0;
   e.dead = false; e.killerId = 0; e._gotFullMap = false; e._frac = 0;
   e.boosting = false; e.boostUntil = 0; e.boostReadyAt = 0;
+  e.cheatSpeed = 0; e.cheatSpeedUntil = 0; e.cheatSize = 0; e.cheatSizeUntil = 0; e.phantomUntil = 0;
   e.shieldUntil = 0;  // no re-shield on manual respawn (shield is a fresh-spawn perk)
   paintSpawnBlob(e); recomputeArea(e);
   if (e.ws && e.ws.readyState === 1) send(e.ws, { t: 'respawn', id: e.id });
@@ -658,8 +753,9 @@ function tick() {
     if (e.dead && e.isBot && e.eliminated && now >= e.respawnAt) { entities.delete(e.id); }
   }
 
-  for (const e of entities.values()) if (e.isBot && !e.dead) botThink(e);
-  for (const e of entities.values()) advance(e);
+  const botsFrozen = now < botFreezeUntil;
+  for (const e of entities.values()) if (e.isBot && !e.dead && !botsFrozen) botThink(e);
+  for (const e of entities.values()) { if (e.isBot && botsFrozen) continue; advance(e); }
 
   maintainBots();
   broadcastState();
@@ -687,7 +783,9 @@ function broadcastState() {
       id: e.id, n: e.name, c: e.color, b: e.isBot ? 1 : 0,
       x: +e.px.toFixed(2), y: +e.py.toFixed(2), h: e.heading,
       o: e.isOutside ? 1 : 0, a: e.area, d: e.dead ? 1 : 0,
-      k: e.killerId || 0, sz: e.sizeMult || 1, sk: e.skin || 'default',
+      k: e.killerId || 0,
+      sz: (e.cheatSizeUntil && Date.now() < e.cheatSizeUntil ? (e.cheatSize||3) : (e.sizeMult || 1)),
+      sk: e.skin || 'default',
       bo: e.boosting ? 1 : 0, sh: (e.shieldUntil && Date.now() < e.shieldUntil) ? 1 : 0,
     });
   }
@@ -775,6 +873,12 @@ wss.on('connection', (ws) => {
       if (!player.boosting && now >= player.boostReadyAt) {
         player.boosting = true;
         player.boostUntil = now + BOOST_DURATION_MS;
+      }
+    } else if (m.t === 'cheat' && player && !player.dead) {
+      // Consumable cheat the client already paid for; apply the real effect.
+      if (CHEAT_IDS.includes(m.id)) {
+        const ok = applyCheat(player, m.id);
+        send(ws, { t: 'cheatResult', id: m.id, ok });
       }
     } else if (m.t === 'respawn' && player && player.dead) {
       // Battle-royale: no respawn once eliminated.

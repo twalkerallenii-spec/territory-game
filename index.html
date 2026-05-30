@@ -82,11 +82,11 @@
   .coinbar{position:absolute;top:18px;right:20px;background:rgba(255,255,255,.9);border:1px solid var(--line);
     border-radius:999px;padding:8px 16px;font-weight:700;color:#7a5b15;z-index:2;box-shadow:0 6px 18px rgba(120,110,90,.15);}
   .coinIcon{color:#f5b301;}
-  .menurow{display:flex;gap:10px;margin-top:12px;}
-  button.ghost{flex:1;background:rgba(255,255,255,.7);color:#5a5346;border:1px solid var(--line);
-    box-shadow:none;font-weight:700;}
-  button.ghost:hover{filter:none;background:#fff;color:var(--accent);}
-  #loadoutHint{color:var(--accent);min-height:14px;}
+  .menurow{display:flex;flex-wrap:wrap;gap:10px;margin-top:12px;}
+  button.ghost{flex:1 1 42%;min-width:0;background:rgba(255,255,255,.1);color:#dfeae6;
+    border:1px solid rgba(255,255,255,.14);box-shadow:none;font-weight:700;}
+  button.ghost:hover{filter:none;background:rgba(255,255,255,.18);color:#ffd23f;}
+  #loadoutHint{color:#ffd23f;min-height:14px;}
 
   /* modals */
   .modal{position:fixed;inset:0;z-index:20;display:flex;align-items:center;justify-content:center;
@@ -111,6 +111,16 @@
   .item button.equipped{background:#2b7a4b;color:#fff;cursor:default;}
   .item button.locked{background:#f0e0a8;color:#7a5b15;}
   .item button.cant{background:#eee;color:#aaa;cursor:not-allowed;}
+
+  /* how-to-play steps */
+  .steps{display:flex;flex-direction:column;gap:12px;}
+  .step{display:flex;gap:14px;align-items:flex-start;background:#fff;border:1px solid var(--line);
+    border-radius:14px;padding:14px 16px;}
+  .step .num{flex:0 0 auto;width:30px;height:30px;border-radius:50%;background:var(--accent);color:#fff;
+    font-weight:800;display:flex;align-items:center;justify-content:center;font-size:15px;
+    box-shadow:0 4px 12px rgba(255,90,122,.35);}
+  .step .txt{font-size:13px;line-height:1.55;color:var(--ink);}
+  .step .txt b{font-weight:700;}
 
   /* chat */
   #chatToggle{position:absolute;left:14px;bottom:14px;width:44px;height:44px;border-radius:14px;
@@ -139,6 +149,17 @@
   #boostFill.active{background:linear-gradient(90deg,#46f0f0,#1f9bd1);animation:boostPulse .6s ease-in-out infinite;}
   @keyframes boostPulse{0%,100%{filter:brightness(1)}50%{filter:brightness(1.35)}}
   #boostLabel{font-size:11px;color:#5a5346;margin-top:5px;text-align:center;font-weight:700;letter-spacing:.03em;}
+
+  /* in-game cheat bar */
+  #cheatBar{position:absolute;left:50%;bottom:48px;transform:translateX(-50%);z-index:6;
+    display:flex;gap:8px;pointer-events:auto;}
+  #cheatBar .cb{width:46px;height:46px;border-radius:12px;border:1px solid var(--line);
+    background:rgba(255,255,255,.92);font-size:22px;cursor:pointer;position:relative;padding:0;
+    box-shadow:0 6px 16px rgba(120,110,90,.2);transition:transform .08s ease;}
+  #cheatBar .cb:hover{transform:translateY(-2px);}
+  #cheatBar .cb .ct{position:absolute;top:-6px;right:-6px;background:var(--accent);color:#fff;
+    font-size:10px;font-weight:800;border-radius:999px;min-width:16px;height:16px;line-height:16px;padding:0 3px;}
+  #cheatBar .cb .key{position:absolute;bottom:-2px;left:0;right:0;font-size:8px;color:#9a8f7a;font-weight:700;}
 
   /* battle-royale results */
   #brResult{position:fixed;inset:0;z-index:14;display:flex;align-items:center;justify-content:center;
@@ -174,6 +195,7 @@
     <div id="boostLabel">⚡ SHIFT to boost</div>
   </div>
   <canvas id="minimap" class="card"></canvas>
+  <div id="cheatBar" class="hidden"></div>
   <div id="status">connecting…</div>
 </div>
 
@@ -211,12 +233,47 @@
         Play
       </button>
       <div class="menurow">
+        <button class="ghost" id="howBtn">❓ How to Play</button>
         <button class="ghost" id="shopBtn">🛒 Shop</button>
         <button class="ghost" id="skinsBtn">🎨 Skins</button>
+        <button class="ghost" id="cheatsBtn">😈 Cheats</button>
       </div>
       <div class="hint">↑ ↓ ← → / WASD to steer · SHIFT to boost · SPACE to respawn</div>
       <div class="hint" id="loadoutHint"></div>
     </div>
+  </div>
+</div>
+
+<!-- CHEATS modal -->
+<div id="cheatsModal" class="modal hidden">
+  <div class="modalcard">
+    <div class="modalhead"><span>😈 Cheats</span>
+      <span class="coinpill"><span class="coinIcon">●</span> <span id="cheatCoins">0</span></span>
+      <button class="x" data-close>✕</button></div>
+    <p class="modalsub">Powerful one-time abilities. Buy them here, then trigger them mid-game from the cheat bar (or number keys 1–0). Each use is consumed.</p>
+    <div id="cheatGrid" class="grid"></div>
+  </div>
+</div>
+
+<!-- HOW TO PLAY modal -->
+<div id="howModal" class="modal hidden">
+  <div class="modalcard">
+    <div class="modalhead"><span>❓ How to Play</span>
+      <button class="x" data-close>✕</button></div>
+    <p class="modalsub">Capture the most land. Here's all you need to know:</p>
+    <div class="steps">
+      <div class="step"><div class="num">1</div><div class="txt">
+        <b>Steer with the arrow keys or WASD.</b> You always move forward and turn in 90° angles. On phone, swipe a direction.</div></div>
+      <div class="step"><div class="num">2</div><div class="txt">
+        <b>Leave your home to draw a trail.</b> The moment you step off your own colored land, a trail follows behind you.</div></div>
+      <div class="step"><div class="num">3</div><div class="txt">
+        <b>Loop back home to claim land.</b> Return to your territory and everything your loop encloses becomes yours. Surround an enemy's land to take it all.</div></div>
+      <div class="step"><div class="num">4</div><div class="txt">
+        <b>Don't get cut.</b> If anyone touches your trail — including yourself — you lose your land. Cut a rival's trail and you steal theirs. Walls are safe; you slide along them.</div></div>
+      <div class="step"><div class="num">5</div><div class="txt">
+        <b>Win the board.</b> Climb the leaderboard, earn coins from kills and big captures, spend them in the Shop on power-ups (tap <b>SHIFT</b> to use Speed Boost), and try Battle Royale for one-life survival.</div></div>
+    </div>
+    <button id="howGotIt" style="margin-top:16px;">Got it — let's play</button>
   </div>
 </div>
 
@@ -325,6 +382,20 @@
   ];
   const MAX_EQUIP = 3;
 
+  // ---- CHEATS (consumable; bought per use, applied in-game) -----------------
+  const CHEATS = [
+    {id:'god',     ic:'😇', nm:'Full God',      ds:'Swap your land with the #1 player. Take it all.', cost:5000},
+    {id:'mach',    ic:'🚀', nm:'Mach Speed',    ds:'3× speed for 20 seconds.',                        cost:4000},
+    {id:'thief',   ic:'🦹', nm:'Land Thief',    ds:'Steal 25% of the biggest player instantly.',      cost:3500},
+    {id:'quake',   ic:'🌋', nm:'Earthquake',    ds:'Everyone else loses their trail + 15% of land.',  cost:3000},
+    {id:'titan',   ic:'🗿', nm:'Titan',         ds:'3× size + 15s of being uncuttable.',              cost:2500},
+    {id:'empire',  ic:'🏯', nm:'Instant Empire',ds:'Spawn a giant block of territory around you.',     cost:2200},
+    {id:'freeze',  ic:'❄️', nm:'Freeze Ray',    ds:'All bots freeze for 8 seconds.',                  cost:1800},
+    {id:'phantom', ic:'🌫️', nm:'Phantom',       ds:'Your trail goes faint for 12 seconds.',           cost:1500},
+    {id:'surge',   ic:'💎', nm:'Magnet Surge',  ds:'Triple all coins for the rest of the match.',      cost:1200},
+    {id:'grand',   ic:'🪙', nm:'Grand Payout',  ds:'Instantly gain 1,000 coins.',                     cost:1000},
+  ];
+
   function loadStore(){
     try{ return JSON.parse(localStorage.getItem('territory_save')||'{}'); }catch(_){ return {}; }
   }
@@ -335,6 +406,7 @@
   store.skins = store.skins || {default:true};      // owned skins
   store.equip = store.equip || [];                  // equipped power-ups for next match
   store.skin  = store.skin  || 'default';           // equipped skin
+  store.cheats = store.cheats || {};                // cheat id -> count owned (consumable)
   saveStore(store);
 
   function addCoins(n){ store.coins += n; saveStore(store); refreshCoinUI(); }
@@ -342,6 +414,7 @@
     document.getElementById('coinAmt').textContent = store.coins;
     const sc=document.getElementById('shopCoins'); if(sc) sc.textContent=store.coins;
     const kc=document.getElementById('skinCoins'); if(kc) kc.textContent=store.coins;
+    const cc=document.getElementById('cheatCoins'); if(cc) cc.textContent=store.coins;
     const lh=document.getElementById('loadoutHint');
     if(lh) lh.textContent = store.equip.length ? ('Equipped: '+store.equip.map(id=>(SHOP.find(s=>s.id===id)||{}).nm).join(', ')) : '';
   }
@@ -401,6 +474,7 @@
         hud.classList.remove('hidden'); joinScreen.classList.add('hidden'); closeModals(); statusEl.textContent='';
         document.getElementById('chatToggle').classList.remove('hidden');
         document.getElementById('boostWrap').classList.toggle('hidden', !hasBoost);
+        cheatSurge=false; renderCheatBar();
         document.getElementById('boardTitle').textContent = activeMode==='br' ? 'Survivors' : 'Leaderboard';
         document.getElementById('myStatLab').textContent = activeMode==='br' ? 'territory · 1 life' : 'your territory';
         // rich-start power-up grants bonus coins on join
@@ -764,6 +838,7 @@
     deathScreen.classList.add('hidden');
     document.getElementById('chatToggle').classList.add('hidden');
     document.getElementById('chatPanel').classList.add('hidden');
+    document.getElementById('cheatBar').classList.add('hidden');
     joinScreen.classList.remove('hidden');
     statusEl.textContent='';
     refreshCoinUI();
@@ -785,9 +860,11 @@
   // ---- SHOP / SKINS ui ----
   const shopModal=document.getElementById('shopModal');
   const skinsModal=document.getElementById('skinsModal');
-  function closeModals(){ shopModal.classList.add('hidden'); skinsModal.classList.add('hidden'); }
+  const howModal=document.getElementById('howModal');
+  const cheatsModal=document.getElementById('cheatsModal');
+  function closeModals(){ shopModal.classList.add('hidden'); skinsModal.classList.add('hidden'); howModal.classList.add('hidden'); cheatsModal.classList.add('hidden'); }
   document.querySelectorAll('[data-close]').forEach(b=>b.onclick=closeModals);
-  [shopModal,skinsModal].forEach(m=>m.addEventListener('click',e=>{ if(e.target===m) closeModals(); }));
+  [shopModal,skinsModal,howModal,cheatsModal].forEach(m=>m.addEventListener('click',e=>{ if(e.target===m) closeModals(); }));
 
   function renderShop(){
     const grid=document.getElementById('shopGrid');
@@ -844,6 +921,64 @@
   }
   document.getElementById('shopBtn').onclick=()=>{ renderShop(); shopModal.classList.remove('hidden'); };
   document.getElementById('skinsBtn').onclick=()=>{ renderSkins(); skinsModal.classList.remove('hidden'); };
+  document.getElementById('howBtn').onclick=()=>{ howModal.classList.remove('hidden'); };
+  document.getElementById('howGotIt').onclick=closeModals;
+  document.getElementById('cheatsBtn').onclick=()=>{ renderCheats(); cheatsModal.classList.remove('hidden'); };
+
+  // ---- CHEATS: buy (consumable) ----
+  function renderCheats(){
+    const grid=document.getElementById('cheatGrid');
+    grid.innerHTML = CHEATS.map(c=>{
+      const have = store.cheats[c.id]||0;
+      const can = store.coins>=c.cost;
+      const haveTag = have>0 ? `<div class="ds" style="color:#2b7a4b;font-weight:700">Owned: ${have}</div>` : '';
+      const btn = `<button class="${can?'locked':'cant'}" data-buycheat="${c.id}">${can?('Buy ● '+c.cost):('Need ● '+c.cost)}</button>`;
+      return `<div class="item"><div class="ic">${c.ic}</div><div class="nm">${c.nm}</div>`+
+             `<div class="ds">${c.ds}</div>${haveTag}${btn}</div>`;
+    }).join('');
+    grid.querySelectorAll('[data-buycheat]').forEach(b=>b.onclick=()=>{
+      const c=CHEATS.find(x=>x.id===b.dataset.buycheat);
+      if(store.coins>=c.cost){ store.coins-=c.cost; store.cheats[c.id]=(store.cheats[c.id]||0)+1; saveStore(store); renderCheats(); refreshCoinUI(); renderCheatBar(); }
+    });
+    refreshCoinUI();
+  }
+
+  // ---- CHEATS: in-game bar + activation ----
+  let cheatSurge=false;  // tripled coins this match (from Magnet Surge)
+  function renderCheatBar(){
+    const bar=document.getElementById('cheatBar');
+    const owned=CHEATS.filter(c=>(store.cheats[c.id]||0)>0);
+    if(!connected || owned.length===0){ bar.classList.add('hidden'); bar.innerHTML=''; return; }
+    bar.classList.remove('hidden');
+    bar.innerHTML = owned.map((c,i)=>{
+      const n=store.cheats[c.id];
+      const key=(i+1)<=9?(i+1):0;
+      return `<button class="cb" data-usecheat="${c.id}" title="${c.nm}">${c.ic}`+
+             `<span class="ct">${n}</span><span class="key">${key}</span></button>`;
+    }).join('');
+    bar.querySelectorAll('[data-usecheat]').forEach(b=>b.onclick=()=>useCheat(b.dataset.usecheat));
+  }
+  function useCheat(id){
+    if(!connected || isDead) return;
+    if((store.cheats[id]||0)<=0) return;
+    // client-side effects
+    if(id==='grand'){ store.cheats[id]--; addCoins(1000); flashCoins('+1000 grand'); saveStore(store); renderCheatBar(); return; }
+    if(id==='surge'){ cheatSurge=true; coinMult=coinMult*3; }
+    // tell server to apply the real effect
+    if(ws&&ws.readyState===1){ ws.send(JSON.stringify({t:'cheat', id})); }
+    store.cheats[id]--; saveStore(store); renderCheatBar();
+    const c=CHEATS.find(x=>x.id===id);
+    flashBanner((c?c.ic+' ':'')+(c?c.nm:'Cheat')+' activated!', '#ffd23f');
+  }
+  // number keys 1-0 trigger owned cheats by slot
+  addEventListener('keydown',(e)=>{
+    const tag=(e.target&&e.target.tagName)||''; if(tag==='INPUT'||tag==='TEXTAREA') return;
+    if(!connected||isDead) return;
+    const owned=CHEATS.filter(c=>(store.cheats[c.id]||0)>0);
+    let slot=-1;
+    if(e.code.startsWith('Digit')){ const d=+e.code.slice(5); slot = d===0?9:d-1; }
+    if(slot>=0 && slot<owned.length){ useCheat(owned[slot].id); e.preventDefault(); }
+  });
 
   // ---- coin flash feedback ----
   let flashTimer=null;
