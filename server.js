@@ -41,16 +41,15 @@ const PALETTE = [
   '#7a1fa2', '#2e8b57', '#c2185b', '#5d4037', '#00838f', '#827717',
 ];
 
-// ---- WORLD STATE -----------------------------------------------------------
-// owner: 0 = neutral, else entity id. trail: 0 = none, else entity id.
-// blocked: 1 = unplayable cell (void/wall) for the current map shape.
-const owner = new Uint8Array(GRID_W * GRID_H);
-const trail = new Uint8Array(GRID_W * GRID_H);
-const blocked = new Uint8Array(GRID_W * GRID_H);
+// ---- WORLD STATE (per-room; the active room's state is bound here) ---------
+// These are rebound by useRoom(room) before each room's logic runs, so the
+// existing functions can keep referring to them by name while each game mode
+// gets its own isolated world.
+let owner = new Uint8Array(GRID_W * GRID_H);
+let trail = new Uint8Array(GRID_W * GRID_H);
+let blocked = new Uint8Array(GRID_W * GRID_H);
 const idx = (x, y) => y * GRID_W + x;
 const inBoundsRaw = (x, y) => x >= 0 && y >= 0 && x < GRID_W && y < GRID_H;
-// "in bounds" now also means "not a blocked void cell" — avatars slide off these
-// just like the map border.
 const inBounds = (x, y) => inBoundsRaw(x, y) && blocked[idx(x, y)] === 0;
 
 // ---- MAP SHAPES ------------------------------------------------------------
@@ -61,7 +60,7 @@ const MAP_SHAPES = [
   { id:'square',   name:'The Arena',     fn:shapeRoundedSquare },
   { id:'triangle', name:'The Pyramid',   fn:shapeRoundedTriangle },
 ];
-let currentMap = MAP_SHAPES[0];
+let currentMap = MAP_SHAPES[0];   // rebound per room by useRoom()
 
 function clearBlocked(){ blocked.fill(0); }
 
@@ -138,8 +137,73 @@ function applyMapShape(shape){
 const DIRS = { N: [0, -1], E: [1, 0], S: [0, 1], W: [-1, 0] };
 const OPP = { N: 'S', S: 'N', E: 'W', W: 'E' };
 
-let nextId = 1;                       // entity ids; 0 reserved for neutral
-const entities = new Map();           // id -> entity
+// ---- ROOMS -----------------------------------------------------------------
+// Each game mode runs in its own isolated world. A Room holds all the state the
+// game functions read via the module-level bindings above; useRoom(room) swaps
+// the bindings to point at that room before its logic runs, so the existing
+// ~40 functions work unchanged on whichever room is active.
+const VALID_MODES = ['classic', 'br'];   // 'teams' added when team mode ships
+const rooms = {};   // mode -> Room
+
+function makeRoom(mode) {
+  const r = {
+    mode,
+    owner: new Uint8Array(GRID_W * GRID_H),
+    trail: new Uint8Array(GRID_W * GRID_H),
+    blocked: new Uint8Array(GRID_W * GRID_H),
+    entities: new Map(),
+    currentMap: MAP_SHAPES[0],
+    botNameCursor: 0,
+    roundResetting: false,
+    freezeUntil: 0,
+    freezeCasterId: 0,
+  };
+  return r;
+}
+
+let activeRoom = null;
+function saveActiveRoom() {
+  if (!activeRoom) return;
+  activeRoom.owner = owner;
+  activeRoom.trail = trail;
+  activeRoom.blocked = blocked;
+  activeRoom.entities = entities;
+  activeRoom.currentMap = currentMap;
+  activeRoom.botNameCursor = botNameCursor;
+  activeRoom.roundResetting = roundResetting;
+  activeRoom.freezeUntil = freezeUntil;
+  activeRoom.freezeCasterId = freezeCasterId;
+}
+function useRoom(room) {
+  if (activeRoom === room) return;
+  saveActiveRoom();
+  activeRoom = room;
+  owner = room.owner;
+  trail = room.trail;
+  blocked = room.blocked;
+  entities = room.entities;
+  currentMap = room.currentMap;
+  botNameCursor = room.botNameCursor;
+  roundResetting = room.roundResetting;
+  freezeUntil = room.freezeUntil;
+  freezeCasterId = room.freezeCasterId;
+}
+
+function getRoom(mode) {
+  const m = VALID_MODES.includes(mode) ? mode : 'classic';
+  if (!rooms[m]) {
+    const room = makeRoom(m);
+    rooms[m] = room;
+    // initialize this room's world (map shape + bots)
+    useRoom(room);
+    applyMapShape(MAP_SHAPES[(Math.random() * MAP_SHAPES.length) | 0]);
+    for (let i = 0; i < MIN_BOTS; i++) spawnEntity({ isBot: true, mode: m });
+  }
+  return rooms[m];
+}
+
+let nextId = 1;                       // entity ids (global across rooms is fine)
+let entities = new Map();             // active room's entities; rebound by useRoom()
 
 // Strictly unique color per live entity: pick an unused palette color at random;
 // if the palette is somehow exhausted, synthesize a distinct HSL hue.
@@ -232,7 +296,7 @@ const BOT_NAMES = [
   'Aymeric', 'Boris', 'Vincent', 'Helga', 'Mateo', 'Priya',
   'Søren', 'Akira', 'Olga', 'Diego', 'Freya', 'Tariq',
 ];
-let botNameCursor = 0;
+let botNameCursor = 0;   // rebound per room
 function nextBotName() {
   const used = new Set([...entities.values()].filter(e => e.isBot).map(e => e.name));
   for (let k = 0; k < BOT_NAMES.length; k++) {
@@ -540,7 +604,7 @@ function captureTerritory(e) {
 }
 
 // Wipe all territory/trails and respawn every entity with a fresh beginner blob.
-let roundResetting = false;
+let roundResetting = false;   // rebound per room
 function roundReset(winner) {
   roundResetting = true;
   owner.fill(0);
@@ -660,7 +724,7 @@ function applyCheat(e, id) {
   return false;
 }
 
-let freezeUntil = 0, freezeCasterId = 0;
+let freezeUntil = 0, freezeCasterId = 0;   // rebound per room
 
 // ---- LOGICAL STEP into a new cell (Blueprint Sec 3A) -----------------------
 function enterCell(e, x, y) {
@@ -879,7 +943,15 @@ function respawnEntity(e) {
   if (e.ws && e.ws.readyState === 1) send(e.ws, { t: 'respawn', id: e.id });
 }
 
+// Top-level tick: run every active room's simulation in isolation.
 function tick() {
+  for (const mode of Object.keys(rooms)) {
+    useRoom(rooms[mode]);
+    tickRoom();
+  }
+}
+
+function tickRoom() {
   const now = Date.now();
 
   // Boost lifecycle: end an active boost when its window closes.
@@ -1047,12 +1119,8 @@ function maybeBotReply(text) {
 
 const wss = new WebSocketServer({ server });
 wss.on('connection', (ws) => {
-  if ([...entities.values()].filter(e => !e.isBot).length + 1 > ROOM_CAP) {
-    send(ws, { t: 'full' });
-    ws.close();
-    return;
-  }
   let player = null;
+  let playerRoom = null;
 
   ws.on('message', (raw) => {
     let m;
@@ -1060,55 +1128,73 @@ wss.on('connection', (ws) => {
 
     if (m.t === 'join') {
       if (player) return;  // already joined
-      const raw = ('' + (m.name || 'Player')).slice(0, 16).trim();
-      const verdict = validateName(raw);
+      const mode = VALID_MODES.includes(m.mode) ? m.mode : 'classic';
+      playerRoom = getRoom(mode);
+      useRoom(playerRoom);
+      // capacity check is per-room
+      if ([...entities.values()].filter(e => !e.isBot).length + 1 > ROOM_CAP) {
+        send(ws, { t: 'full' });
+        return;
+      }
+      const nm = ('' + (m.name || 'Player')).slice(0, 16).trim();
+      const verdict = validateName(nm);
       if (!verdict.ok) {
         send(ws, { t: 'nameReject', reason: verdict.reason, message: verdict.message });
         return;
       }
-      player = spawnEntity({ isBot: false, name: raw || 'Player', loadout: m.loadout, mode: m.mode });
+      player = spawnEntity({ isBot: false, name: nm || 'Player', loadout: m.loadout, mode });
       player.ws = ws;
+      player.room = playerRoom;
       player.skin = (typeof m.skin === 'string') ? m.skin.slice(0, 24) : 'default';
       send(ws, { t: 'welcome', id: player.id, w: GRID_W, h: GRID_H, loadout: player.loadout,
                  boostMs: BOOST_DURATION_MS, cooldownMs: BOOST_COOLDOWN_MS, mode: player.mode,
                  mapId: currentMap.id, mapName: currentMap.name, blocked: rleEncode(blocked),
                  outline: mapOutline() });
-    } else if (m.t === 'turn' && player && !player.dead) {
+      return;
+    }
+
+    // all other messages operate within the player's room
+    if (!player || !playerRoom) return;
+    useRoom(playerRoom);
+
+    if (m.t === 'turn' && !player.dead) {
       if (['N', 'E', 'S', 'W'].includes(m.d)) player.pendingTurn = m.d;  // intent only
-    } else if (m.t === 'boost' && player && !player.dead && player.hasBoost) {
+    } else if (m.t === 'boost' && !player.dead && player.hasBoost) {
       const now = Date.now();
       if (!player.boosting && now >= player.boostReadyAt) {
         player.boosting = true;
         player.boostUntil = now + BOOST_DURATION_MS;
       }
-    } else if (m.t === 'cheat' && player && !player.dead) {
-      // Consumable cheat the client already paid for; apply the real effect.
+    } else if (m.t === 'cheat' && !player.dead) {
       if (CHEAT_IDS.includes(m.id)) {
         const ok = applyCheat(player, m.id);
         send(ws, { t: 'cheatResult', id: m.id, ok });
       }
-    } else if (m.t === 'respawn' && player && player.dead) {
-      // Battle-royale: no respawn once eliminated.
+    } else if (m.t === 'respawn' && player.dead) {
       if (!player.eliminated) respawnEntity(player);
-    } else if (m.t === 'chat' && player) {
+    } else if (m.t === 'chat') {
       const text = ('' + (m.text || '')).slice(0, 120).trim();
       if (text) {
         const out = JSON.stringify({ t: 'chat', name: player.name, color: player.color, text });
         for (const e of entities.values()) if (e.ws && e.ws.readyState === 1) e.ws.send(out);
-        maybeBotReply(text);   // bots clap back if their name is mentioned
+        maybeBotReply(text);
       }
     }
   });
 
   ws.on('close', () => {
-    if (player) { clearTrail(player); releaseTerritory(player); entities.delete(player.id); }
+    if (player && playerRoom) {
+      useRoom(playerRoom);
+      clearTrail(player); releaseTerritory(player); entities.delete(player.id);
+    }
   });
 });
 
-// seed initial bots
-for (let i = 0; i < MIN_BOTS; i++) spawnEntity({ isBot: true });
+// Pre-create the three mode rooms so bots are populated and ready before the
+// first player joins each one.
+for (const mode of VALID_MODES) getRoom(mode);
 
 setInterval(tick, 1000 / TICK_RATE);
 server.listen(PORT, () => {
-  console.log(`Paper.io-class server on http://localhost:${PORT}  (${TICK_RATE} ticks/s, grid ${GRID_W}x${GRID_H})`);
+  console.log(`Paper.io-class server on http://localhost:${PORT}  (${TICK_RATE} ticks/s, rooms: ${VALID_MODES.join(', ')})`);
 });
