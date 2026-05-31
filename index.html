@@ -485,10 +485,8 @@
     {id:'big',   ic:'🟦', nm:'Big Mode',     ds:'Start noticeably bigger.',     cost:150},
     {id:'zoom',  ic:'🔭', nm:'Wide View',    ds:'See more of the map.',         cost:120},
     {id:'head',  ic:'🏰', nm:'Head Start',   ds:'Bigger starting territory.',   cost:200},
-    {id:'magnet',ic:'🧲', nm:'Coin Magnet',  ds:'+50% coins this match.',       cost:250},
     {id:'shield',ic:'🛡️', nm:'Spawn Shield', ds:'4s of protection at spawn.',   cost:200},
     {id:'guard', ic:'⛨', nm:'Mini Shield',  ds:'2.5s spawn protection.',       cost:120},
-    {id:'rich',  ic:'💰', nm:'Rich Start',   ds:'+100 coins when you join.',    cost:180},
     {id:'phase', ic:'👻', nm:'Ghost Trail',  ds:'Fainter, sneakier trail.',     cost:160},
     {id:'swift', ic:'💨', nm:'Swift Turns',  ds:'Snappier turn feel.',          cost:130},
   ];
@@ -623,14 +621,14 @@
   }
 
   // ---- WS ----
-  let coinMult = 1;                     // raised by the magnet power-up this match
+  let coinMult = 1;                     // tripled by the Magnet Surge cheat mid-match
   function connect(name){
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     ws = new WebSocket(`${proto}://${location.host}`);
     // apply client-side power-up effects for this match
     zoomOut = store.equip.includes('zoom');
     CELL_SCREEN = zoomOut ? 9 : BASE_CELL;
-    coinMult = store.equip.includes('magnet') ? 1.5 : 1;
+    coinMult = 1;   // base; the Magnet Surge cheat can still triple it mid-match
     hasBoost = store.equip.includes('boost');
     boostState = 'idle'; boostStart = 0;
     activeMode = selectedMode;
@@ -651,7 +649,6 @@
         cheatSurge=false; renderCheatBar();
         document.getElementById('boardTitle').textContent = activeMode==='br' ? 'Survivors' : 'Leaderboard';
         document.getElementById('myStatLab').textContent = activeMode==='br' ? 'territory · 1 life' : 'your territory';
-        if (store.equip.includes('rich')){ addCoins(100); flashCoins('+100 rich start'); }
         lastMyArea = null; lowestPct = 100; Sound.start();
         boostedThisLife=false; cutThisRound=false; machUntil=0; lastKillT=0;
         store.matchesPlayed=(store.matchesPlayed||0)+1; saveStore(store);
@@ -967,9 +964,18 @@
     for(let y=y0;y<=y1+1;y++){const sy=oy+y*cs;ctx.moveTo(ox+x0*cs,sy);ctx.lineTo(ox+(x1+1)*cs,sy);}
     ctx.stroke();
 
-    // --- void area (outside the map shape), drawn SMOOTH ---
-    const voidColor = (activeMode==='br') ? '#3a2a55' : '#243d38';   // purple storm in BR
-    if(blocked && mapOutline){
+    // --- void area (outside the playable region) ---
+    // Classic: the map shape is static, so draw a clean SMOOTH cut-out.
+    // BR: the storm constantly reshapes `blocked`, so the smooth outline would
+    // be wrong — render the void directly from the live blocked grid instead so
+    // it always matches reality (no corrupted patchwork).
+    const voidColor = (activeMode==='br') ? '#3a2a55' : '#243d38';
+    if(activeMode==='br' && blocked){
+      ctx.fillStyle=voidColor;
+      for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){
+        if(blocked[y*GW+x]===1) ctx.fillRect(ox+x*cs, oy+y*cs, cs+1, cs+1);
+      }
+    } else if(blocked && mapOutline){
       ctx.save();
       ctx.beginPath();
       ctx.rect(ox-2, oy-2, GW*cs+4, GH*cs+4);
@@ -1572,14 +1578,17 @@
           l.classList.add('lit');
           progress++;
           if (progress === SEQ.length) {
-            // success — but cap to once per 60s so it isn't spammed
-            if (now - lastReward > 60000) {
-              lastReward = now;
+            // 24-hour cooldown, persisted so refreshing can't farm it
+            const DAY = 24*60*60*1000;
+            const nowMs = Date.now();
+            if (nowMs - (store.paperCodeAt||0) >= DAY) {
+              store.paperCodeAt = nowMs; saveStore(store);
               addCoins(10000);
               flashCoins('+10,000 secret!');
               flashBanner('🎉 Secret PAPER code! +10,000 coins', '#ffd23f');
             } else {
-              flashBanner('Secret code on cooldown…', '#9fb0aa');
+              const hrsLeft = Math.ceil((DAY - (nowMs - store.paperCodeAt))/3600000);
+              flashBanner('Secret code recharges in ~'+hrsLeft+'h', '#9fb0aa');
             }
             setTimeout(resetSeq, 400);
           }

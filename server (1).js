@@ -341,11 +341,9 @@ const POWERUPS = {
   big:    { sizeMult: 1.7 },      // bigger character
   zoom:   { zoomOut: true },      // client renders a wider view
   head:   { startBlob: 5 },       // bigger starting territory
-  magnet: { coinMult: 1.5 },      // client-side coin bonus
   shield: { shieldMs: 4000 },     // spawn protection (server-enforced)
-  phase:  { phaseTrail: true },   // your trail is slightly shorter-lived (cosmetic-ish)
-  rich:   { startCoins: true },   // client grants bonus coins on join
-  swift:  { turnPrio: true },     // queue turns a touch earlier (handled client/animation)
+  phase:  { phaseTrail: true },   // fainter trail (cosmetic-ish)
+  swift:  { turnPrio: true },     // queue turns a touch earlier
   guard:  { shieldMs: 2500 },     // shorter shield variant
 };
 
@@ -1166,19 +1164,14 @@ function broadcastState() {
     br = { inset: activeRoom.brStormInset, phase, secs: Math.max(0, secsToNext), alive: aliveCount, total: BR_START_BOTS + 1 };
   }
 
-  // BANDWIDTH SAVER 2: the owner (territory) grid changes only on captures, so
-  // only send it when it actually changed since this room's last broadcast.
-  // The trail grid is small (RLE of mostly-zeros) and changes constantly, so we
-  // still send it each broadcast.
-  const ownerRle = rleEncode(owner);
-  const ownerStr = ownerRle.join(',');
-  const ownerChanged = (activeRoom._lastOwnerStr !== ownerStr);
-  if (ownerChanged) activeRoom._lastOwnerStr = ownerStr;
-
+  // NOTE: we always send the full owner grid. (An earlier "send only when
+  // changed" optimization caused late-joiners to start with an empty grid and
+  // desync into a corrupted display, so it was removed. The big bandwidth wins
+  // are skipping empty rooms and the half-rate broadcast, which are safe.)
   const msg = JSON.stringify({
     t: 'state',
     w: GRID_W, h: GRID_H,
-    owner: ownerChanged ? ownerRle : null,   // null = "unchanged, reuse last"
+    owner: rleEncode(owner),
     trail: rleEncode(trail),
     ents,
     br,
