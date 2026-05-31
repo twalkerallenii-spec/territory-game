@@ -124,6 +124,7 @@ function makeRoom(mode) {
     freezeCasterId: 0,
     // Battle Royale match state
     brActive: false,
+    brEnding: false,
     brStart: 0,          // match start timestamp
     brStormInset: 0,     // how many cells the storm has eaten from each side
   };
@@ -366,9 +367,11 @@ function spawnEntity({ isBot, name, loadout, mode }) {
     boostReadyAt: 0,
     // spawn shield
     shieldUntil: shieldMs ? Date.now() + shieldMs : 0,
-    // bot personality (varies behavior so 12 AI don't act identically)
-    botAggro: isBot ? 0.3 + Math.random() * 0.6 : 0,   // willingness to hunt trails
-    botGreed: isBot ? 12 + Math.random() * 28 : 0,      // trail length before retreating
+    // bot personality. BR bots are tougher: more aggressive hunters AND more
+    // cautious (they retreat sooner, so they expose themselves less and die less).
+    botAggro: isBot ? (mode === 'br' ? 0.55 + Math.random() * 0.45 : 0.3 + Math.random() * 0.6) : 0,
+    botGreed: isBot ? (mode === 'br' ? 8 + Math.random() * 14 : 12 + Math.random() * 28) : 0,
+    botSkill: isBot ? (mode === 'br' ? 0.9 : 0.6) : 0,   // how reliably they dodge danger
     botTarget: null,
     ws: null,
   };
@@ -519,29 +522,43 @@ function updateBrStorm() {
   }
 }
 
-// Check for a Victory Royale: exactly one (or zero) entities left alive.
+// Check for a Victory Royale: one (or zero) entities left alive.
 function checkBrWin() {
-  if (!activeRoom || activeRoom.mode !== 'br' || !activeRoom.brActive) return;
+  if (!activeRoom || activeRoom.mode !== 'br' || !activeRoom.brActive || activeRoom.brEnding) return;
+  // Need at least 2 entities to have ever been in the match (avoid instant win
+  // on an empty/just-created room before bots seed).
+  const total = [...entities.values()].length;
+  if (total < 2) return;
   const alive = [...entities.values()].filter(e => !e.dead && !e.eliminated);
   if (alive.length > 1) return;
-  // we have a winner (or empty room)
+
+  // We have a winner (last one alive — human or bot).
   activeRoom.brActive = false;
+  activeRoom.brEnding = true;
   const winner = alive[0] || null;
-  if (winner && !winner.isBot && winner.ws && winner.ws.readyState === 1) {
-    send(winner.ws, { t: 'victory', coins: BR_COIN_WIN, placement: 1 });
+  const winnerName = winner ? winner.name : 'Nobody';
+  const endingRoom = activeRoom;
+
+  // Tell EVERY human in the room the result: the winner gets Victory + coins;
+  // everyone else sees who won.
+  for (const e of entities.values()) {
+    if (e.isBot || !e.ws || e.ws.readyState !== 1) continue;
+    if (winner && e.id === winner.id) {
+      send(e.ws, { t: 'victory', coins: BR_COIN_WIN, placement: 1, winner: winnerName });
+    } else {
+      send(e.ws, { t: 'brover', winner: winnerName });
+    }
   }
-  // brief pause, then start a fresh BR match: revive everyone with new spawns
+
+  // brief pause, then start a fresh BR match
   setTimeout(() => {
     const room = rooms['br'];
     if (!room) return;
     useRoom(room);
-    // reset world
     owner.fill(0); trail.fill(0);
     applyMapShape(MAP_SHAPES[(Math.random() * MAP_SHAPES.length) | 0]);
-    // remove all bots, respawn a fresh full field
     for (const e of [...entities.values()]) if (e.isBot) entities.delete(e.id);
     for (let i = 0; i < BR_START_BOTS; i++) spawnEntity({ isBot: true, mode: 'br' });
-    // revive human players for the new match
     for (const e of entities.values()) {
       if (!e.isBot) {
         e.eliminated = false; e.dead = false; e.kills = 0; e.streak = 0; e.deathsBy = {};
@@ -549,8 +566,9 @@ function checkBrWin() {
         if (e.ws && e.ws.readyState === 1) send(e.ws, { t: 'brnewmatch' });
       }
     }
+    room.brEnding = false;
     startBrMatch(room);
-  }, 4000);
+  }, 5000);
 }
 
 // ---- CAPTURE: inverse flood fill (Blueprint Sec 2A) ------------------------
@@ -938,6 +956,15 @@ function botThink(e) {
     if (t) e.pendingTurn = t;
     return;
   }
+  // SURVIVE (lookahead) — skilled bots also dodge danger 2 cells ahead, so they
+  // don't trap themselves. BR bots have high botSkill, making them much harder.
+  if (e.botSkill && Math.random() < e.botSkill) {
+    const ax2 = e.cx + dx * 2, ay2 = e.cy + dy * 2;
+    if (!cellSafeForBot(e, ax2, ay2)) {
+      const t = safeTurn();
+      if (t) { e.pendingTurn = t; return; }
+    }
+  }
 
   // HUNT — chase a nearby enemy trail if this bot is aggressive and not over-extended
   if (exposure < e.botGreed * 1.3 && Math.random() < e.botAggro * 0.5) {
@@ -1024,9 +1051,12 @@ function tickRoom() {
 
   // Battle Royale: advance the storm and check for a winner.
   if (activeRoom && activeRoom.mode === 'br') {
+    // Self-heal: if there's no active match but the room has entities, start one.
+    if (!activeRoom.brActive && entities.size > 0 && !activeRoom.brEnding) {
+      startBrMatch(activeRoom);
+    }
     const insetBefore = activeRoom.brStormInset;
     updateBrStorm();
-    // if the storm grew, re-send the blocked grid so clients see it close in
     if (activeRoom.brStormInset !== insetBefore) {
       const blob = rleEncode(blocked);
       for (const e of entities.values()) {
@@ -1072,12 +1102,32 @@ function broadcastState() {
       bo: e.boosting ? 1 : 0, sh: (e.shieldUntil && Date.now() < e.shieldUntil) ? 1 : 0,
     });
   }
+  // Battle Royale: include storm timing + alive count so the client can render
+  // the shrinking circle and a Fortnite-style countdown.
+  let br = null;
+  if (activeRoom && activeRoom.mode === 'br') {
+    const now = Date.now();
+    const elapsed = activeRoom.brActive ? (now - activeRoom.brStart) : 0;
+    const aliveCount = [...entities.values()].filter(e => !e.dead && !e.eliminated).length;
+    let phase, secsToNext;
+    if (elapsed < BR_STORM_START_MS) {
+      phase = 'grace';
+      secsToNext = Math.ceil((BR_STORM_START_MS - elapsed) / 1000);
+    } else {
+      const prog = Math.min(1, (elapsed - BR_STORM_START_MS) / BR_STORM_SHRINK_MS);
+      phase = prog >= 1 ? 'closed' : 'closing';
+      secsToNext = Math.ceil((BR_STORM_SHRINK_MS - (elapsed - BR_STORM_START_MS)) / 1000);
+    }
+    br = { inset: activeRoom.brStormInset, phase, secs: Math.max(0, secsToNext), alive: aliveCount, total: BR_START_BOTS + 1 };
+  }
+
   const msg = JSON.stringify({
     t: 'state',
     w: GRID_W, h: GRID_H,
     owner: rleEncode(owner),
     trail: rleEncode(trail),
     ents,
+    br,
   });
   for (const e of entities.values()) {
     if (e.ws && e.ws.readyState === 1) e.ws.send(msg);

@@ -215,6 +215,13 @@
   .re-board .rr .pc{color:#c3d2cc;font-variant-numeric:tabular-nums;}
   .re-board .rr.me .nm{color:#ffd23f;font-weight:800;}
   .re-next{margin-top:16px;font-size:12px;color:#9fb0aa;letter-spacing:.1em;}
+  /* battle-royale storm HUD */
+  #stormHud{position:absolute;top:14px;left:50%;transform:translateX(-50%);z-index:6;
+    background:rgba(60,40,90,.86);color:#fff;border:1px solid rgba(180,150,230,.4);
+    border-radius:12px;padding:8px 16px;text-align:center;pointer-events:none;
+    box-shadow:0 6px 20px rgba(0,0,0,.3);}
+  #stormLabel{font-weight:800;font-size:14px;letter-spacing:.02em;}
+  #stormAlive{font-size:12px;color:#d9c9ff;margin-top:2px;}
 </style>
 </head>
 <body>
@@ -238,6 +245,10 @@
     <div id="boostLabel">⚡ SHIFT to boost</div>
   </div>
   <canvas id="minimap" class="card"></canvas>
+  <div id="stormHud" class="hidden">
+    <div id="stormLabel">⛈️ Storm</div>
+    <div id="stormAlive">👥 0 alive</div>
+  </div>
   <div id="cheatBar" class="hidden"></div>
   <div id="status">connecting…</div>
 </div>
@@ -280,10 +291,22 @@
         <button class="ghost" id="shopBtn">🛒 Shop</button>
         <button class="ghost" id="skinsBtn">🎨 Skins</button>
         <button class="ghost" id="cheatsBtn">😈 Cheats</button>
+        <button class="ghost" id="trophiesBtn">🏆 Trophies</button>
       </div>
       <div class="hint">↑ ↓ ← → / WASD to steer · SHIFT to boost · SPACE to respawn</div>
       <div class="hint" id="loadoutHint"></div>
     </div>
+  </div>
+</div>
+
+<!-- TROPHIES modal -->
+<div id="trophiesModal" class="modal hidden">
+  <div class="modalcard">
+    <div class="modalhead"><span>🏆 Trophies</span>
+      <span class="coinpill" id="trophyCount">0 / 10</span>
+      <button class="x" data-close>✕</button></div>
+    <p class="modalsub">Earn these by playing. Locked ones show what to do.</p>
+    <div id="trophyGrid" class="grid"></div>
   </div>
 </div>
 
@@ -479,6 +502,27 @@
   ];
   const MAX_EQUIP = 3;
 
+  // ---- TROPHIES / ACHIEVEMENTS (browser-saved, unlock once) ----------------
+  const TROPHIES = [
+    {id:'first_blood', ic:'🩸', nm:'First Blood',   ds:'Get your first kill.'},
+    {id:'hat_trick',   ic:'🎩', nm:'Hat Trick',     ds:'3 kills in one life.'},
+    {id:'spree',       ic:'🔥', nm:'Killing Spree', ds:'5 kills in one life.'},
+    {id:'victory',     ic:'👑', nm:'Victory Royale',ds:'Win a Battle Royale.'},
+    {id:'survivor',    ic:'🛡️', nm:'Survivor',      ds:'Finish top 3 in a Battle Royale.'},
+    {id:'baron',       ic:'🏰', nm:'Land Baron',    ds:'Control 50% of the map at once.'},
+    {id:'conqueror',   ic:'🌍', nm:'Conqueror',     ds:'Hit 100% and win a round.'},
+    {id:'storm',       ic:'⛈️', nm:'Storm Chaser',  ds:'Win a BR that reaches the final circle.'},
+    {id:'comeback',    ic:'💪', nm:'Comeback Kid',  ds:'Win after being under 5% territory.'},
+    {id:'centurion',   ic:'⚔️', nm:'Centurion',     ds:'100 total kills (lifetime).'},
+  ];
+  function awardTrophy(id){
+    store.trophies = store.trophies || {};
+    if(store.trophies[id]) return;            // already unlocked
+    store.trophies[id]=Date.now(); saveStore(store);
+    const tr=TROPHIES.find(t=>t.id===id);
+    if(tr){ Sound.win(); flashBanner('🏆 Trophy unlocked: '+tr.ic+' '+tr.nm, '#ffd23f'); }
+  }
+
   // ---- CHEATS (consumable; bought per use, applied in-game) -----------------
   const CHEATS = [
     {id:'god',     ic:'😇', nm:'Full God',      ds:'Swap your land with the #1 player. Take it all.', cost:10000},
@@ -504,6 +548,8 @@
   store.equip = store.equip || [];                  // equipped power-ups for next match
   store.skin  = store.skin  || 'default';           // equipped skin
   store.cheats = store.cheats || {};                // cheat id -> count owned (consumable)
+  store.trophies = store.trophies || {};            // trophy id -> unlock timestamp
+  store.lifetimeKills = store.lifetimeKills || 0;    // total kills across all games
   saveStore(store);
 
   function addCoins(n){ store.coins += n; saveStore(store); refreshCoinUI(); }
@@ -580,7 +626,7 @@
         document.getElementById('boardTitle').textContent = activeMode==='br' ? 'Survivors' : 'Leaderboard';
         document.getElementById('myStatLab').textContent = activeMode==='br' ? 'territory · 1 life' : 'your territory';
         if (store.equip.includes('rich')){ addCoins(100); flashCoins('+100 rich start'); }
-        lastMyArea = null; Sound.start();
+        lastMyArea = null; lowestPct = 100; Sound.start();
         playMapIntro(m.mapName||'The Arena', false);   // "Starting match" intro
       }
       else if (m.t==='full'){ statusEl.textContent='world is full — try again shortly'; }
@@ -589,12 +635,20 @@
       else if (m.t==='respawn'){ onRespawn(); }
       else if (m.t==='booted'){ Sound.death(); onBooted(m.by); }
       else if (m.t==='victory'){ onVictory(m.coins, m.placement); }
+      else if (m.t==='brover'){ onBrOver(m.winner); }
       else if (m.t==='brnewmatch'){ onBrNewMatch(); }
       else if (m.t==='storm'){ if(m.blocked) blocked=rleDecode(m.blocked, GW*GH); }
       else if (m.t==='roundreset'){ if(m.blocked) blocked=rleDecode(m.blocked, GW*GH); if(m.outline) mapOutline=m.outline; onRoundReset(m.winner, m.mapName); }
       else if (m.t==='kill'){ Sound.kill(); const base=(m.coins||20); const c=Math.round(base*coinMult); addCoins(c);
-        flashCoins('+'+c + (m.mult>1?(' · x'+m.mult+' streak!'):'')); }
-      else if (m.t==='fullmap'){ Sound.win(); const c=Math.round((m.coins||1000)*coinMult); addCoins(c); flashCoins('+'+c+' 100%!'); }
+        flashCoins('+'+c + (m.mult>1?(' · x'+m.mult+' streak!'):''));
+        // trophies: first blood, hat trick, spree, centurion
+        store.lifetimeKills=(store.lifetimeKills||0)+1; saveStore(store);
+        awardTrophy('first_blood');
+        if((m.total||0)>=3) awardTrophy('hat_trick');
+        if((m.total||0)>=5) awardTrophy('spree');
+        if(store.lifetimeKills>=100) awardTrophy('centurion');
+      }
+      else if (m.t==='fullmap'){ Sound.win(); const c=Math.round((m.coins||1000)*coinMult); addCoins(c); flashCoins('+'+c+' 100%!'); awardTrophy('conqueror'); }
       else if (m.t==='chat'){ addChat(m.name, m.color, m.text); }
     };
   }
@@ -611,9 +665,28 @@
       if (!view.has(e.id)) view.set(e.id, {x:e.x,y:e.y});
     }
     for (const id of [...ents.keys()]) if(!seen.has(id)){ ents.delete(id); view.delete(id); }
+    brState = m.br || null;
     updateHud();
     updateBoostMeter();
+    updateStormHud();
     drawMinimap();
+  }
+  let brState = null;
+
+  // Fortnite-style storm HUD: countdown + alive count
+  function updateStormHud(){
+    const el=document.getElementById('stormHud');
+    if(!el) return;
+    if(!brState || activeMode!=='br'){ el.classList.add('hidden'); return; }
+    el.classList.remove('hidden');
+    const mins=Math.floor(brState.secs/60), secs=brState.secs%60;
+    const tstr=mins+':'+(secs<10?'0':'')+secs;
+    let label;
+    if(brState.phase==='grace') label='⛈️ Storm closes in '+tstr;
+    else if(brState.phase==='closing') label='⛈️ Storm closing · '+tstr;
+    else label='⛈️ Final circle';
+    document.getElementById('stormLabel').textContent=label;
+    document.getElementById('stormAlive').textContent='👥 '+brState.alive+' alive';
   }
 
   function updateHud(){
@@ -629,12 +702,16 @@
     const me = ents.get(myId);
     if (me){
       myAreaEl.textContent = (me.area/total*100).toFixed(2)+'%';
-      // capture "pop" when my territory grows by a meaningful chunk
       if (lastMyArea!==null && me.area > lastMyArea + 3) Sound.capture();
       lastMyArea = me.area;
+      // trophy tracking
+      const pct = me.area/total*100;
+      if (pct >= 50) awardTrophy('baron');
+      if (pct > 0 && pct < lowestPct) lowestPct = pct;   // track for comeback
     }
   }
   let lastMyArea = null;
+  let lowestPct = 100;   // lowest territory % this life (for Comeback Kid)
   function escapeHtml(s){return (''+s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 
   // ---- INPUT (intent only) ----
@@ -680,6 +757,7 @@
       document.getElementById('brSub').textContent = (reason==='storm') ? 'Caught in the storm.' :
         (killer ? ('Cut down by '+killer.name+'.') : 'You were cut down.');
       br.classList.remove('hidden');
+      if(placement && placement<=3) awardTrophy('survivor');
       return;
     }
     const labels={cut:'cut by a rival',self:'crossed your own trail'};
@@ -687,7 +765,7 @@
     spectateLabel.textContent = killer ? ('Spectating '+killer.name) : 'Spectating the board';
     deathScreen.classList.remove('hidden');
   }
-  function onRespawn(){ isDead=false; spectateId=null; deathScreen.classList.add('hidden'); }
+  function onRespawn(){ isDead=false; spectateId=null; deathScreen.classList.add('hidden'); lastMyArea=null; lowestPct=100; }
 
   // Battle Royale: you're the last one standing — Victory Royale.
   function onVictory(coins, placement){
@@ -700,14 +778,23 @@
     document.getElementById('brHead').textContent='Victory Royale! 👑';
     document.getElementById('brSub').textContent='Last one standing. +'+c+' coins!';
     br.classList.remove('hidden');
+    // trophies for winning
+    awardTrophy('victory');
+    awardTrophy('survivor');                       // winning is also top-3
+    if (brState && brState.phase==='closed') awardTrophy('storm');
+    if (lowestPct < 5) awardTrophy('comeback');
   }
   // A fresh BR match is starting — clear the results and resume play.
   function onBrNewMatch(){
     isDead=false; spectateId=null;
     document.getElementById('brResult').classList.add('hidden');
     deathScreen.classList.add('hidden');
-    lastMyArea=null;
+    lastMyArea=null; lowestPct=100;
     flashBanner('🪂 New Battle Royale — drop in!', '#ffd23f');
+  }
+  // Someone else won the BR (you were already out) — show who.
+  function onBrOver(winner){
+    flashBanner('👑 '+(winner||'Someone')+' won the Battle Royale', '#ffd23f');
   }
 
   // Sent to the main menu after being cut 3× by the same player (Classic).
@@ -837,18 +924,15 @@
     ctx.stroke();
 
     // --- void area (outside the map shape), drawn SMOOTH ---
-    // Instead of dark per-cell blocks (which look jagged), fill the whole map
-    // rect dark, then "cut out" the smooth play shape so its edge is clean.
+    const voidColor = (activeMode==='br') ? '#3a2a55' : '#243d38';   // purple storm in BR
     if(blocked && mapOutline){
       ctx.save();
-      // build a path = big rect MINUS the smooth shape, fill it dark (even-odd)
       ctx.beginPath();
-      ctx.rect(ox-2, oy-2, GW*cs+4, GH*cs+4);     // outer (whole map)
-      traceOutline(ox, oy, cs);                    // inner (play shape)
-      ctx.fillStyle='#243d38';
-      ctx.fill('evenodd');                         // dark everywhere except the shape
+      ctx.rect(ox-2, oy-2, GW*cs+4, GH*cs+4);
+      traceOutline(ox, oy, cs);
+      ctx.fillStyle=voidColor;
+      ctx.fill('evenodd');
       ctx.restore();
-      // clean boundary line on the shape edge
       ctx.save();
       traceOutline(ox, oy, cs);
       ctx.lineJoin='round'; ctx.lineCap='round';
@@ -856,10 +940,21 @@
       ctx.strokeStyle='rgba(255,255,255,0.3)'; ctx.lineWidth=1.5; ctx.stroke();
       ctx.restore();
     } else if(blocked){
-      ctx.fillStyle='#243d38';
+      ctx.fillStyle=voidColor;
       for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){
         if(blocked[y*GW+x]===1) ctx.fillRect(ox+x*cs, oy+y*cs, cs+1, cs+1);
       }
+    }
+    // BR storm: glowing edge on the shrinking safe box
+    if(activeMode==='br' && brState && brState.inset>0){
+      const ins=brState.inset;
+      const sx=ox+ins*cs, sy=oy+ins*cs, sw=(GW-2*ins)*cs, sh=(GH-2*ins)*cs;
+      const pulse=0.5+0.5*Math.sin(performance.now()/300);
+      ctx.save();
+      ctx.strokeStyle='rgba(180,120,255,'+(0.6+0.3*pulse)+')';
+      ctx.lineWidth=3; ctx.shadowColor='#b478ff'; ctx.shadowBlur=14;
+      ctx.strokeRect(sx, sy, sw, sh);
+      ctx.restore();
     }
 
 
@@ -1090,6 +1185,8 @@
     document.getElementById('chatToggle').classList.add('hidden');
     document.getElementById('chatPanel').classList.add('hidden');
     document.getElementById('cheatBar').classList.add('hidden');
+    document.getElementById('stormHud').classList.add('hidden');
+    brState=null;
     joinScreen.classList.remove('hidden');
     statusEl.textContent='';
     refreshCoinUI();
@@ -1121,9 +1218,10 @@
   const skinsModal=document.getElementById('skinsModal');
   const howModal=document.getElementById('howModal');
   const cheatsModal=document.getElementById('cheatsModal');
-  function closeModals(){ shopModal.classList.add('hidden'); skinsModal.classList.add('hidden'); howModal.classList.add('hidden'); cheatsModal.classList.add('hidden'); }
+  const trophiesModal=document.getElementById('trophiesModal');
+  function closeModals(){ shopModal.classList.add('hidden'); skinsModal.classList.add('hidden'); howModal.classList.add('hidden'); cheatsModal.classList.add('hidden'); trophiesModal.classList.add('hidden'); }
   document.querySelectorAll('[data-close]').forEach(b=>b.onclick=closeModals);
-  [shopModal,skinsModal,howModal,cheatsModal].forEach(m=>m.addEventListener('click',e=>{ if(e.target===m) closeModals(); }));
+  [shopModal,skinsModal,howModal,cheatsModal,trophiesModal].forEach(m=>m.addEventListener('click',e=>{ if(e.target===m) closeModals(); }));
 
   function renderShop(){
     const grid=document.getElementById('shopGrid');
@@ -1183,6 +1281,21 @@
   document.getElementById('howBtn').onclick=()=>{ howModal.classList.remove('hidden'); };
   document.getElementById('howGotIt').onclick=closeModals;
   document.getElementById('cheatsBtn').onclick=()=>{ renderCheats(); cheatsModal.classList.remove('hidden'); };
+  document.getElementById('trophiesBtn').onclick=()=>{ renderTrophies(); trophiesModal.classList.remove('hidden'); };
+
+  function renderTrophies(){
+    store.trophies=store.trophies||{};
+    const unlocked=TROPHIES.filter(t=>store.trophies[t.id]).length;
+    document.getElementById('trophyCount').textContent=unlocked+' / '+TROPHIES.length;
+    const grid=document.getElementById('trophyGrid');
+    grid.innerHTML=TROPHIES.map(t=>{
+      const got=!!store.trophies[t.id];
+      return `<div class="item" style="opacity:${got?1:0.55}">`+
+        `<div class="ic">${got?t.ic:'🔒'}</div><div class="nm">${t.nm}</div>`+
+        `<div class="ds">${t.ds}</div>`+
+        `<div class="ds" style="color:${got?'#2b7a4b':'#9a8f7a'};font-weight:700">${got?'Unlocked':'Locked'}</div></div>`;
+    }).join('');
+  }
 
   // ---- CHEATS: buy (consumable) ----
   function renderCheats(){
