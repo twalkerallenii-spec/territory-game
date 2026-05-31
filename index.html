@@ -35,6 +35,11 @@
     box-shadow:0 6px 22px rgba(120,110,90,.12);transition:transform .08s ease,color .15s ease;padding:0;}
   #homeBtn:hover{color:var(--accent);transform:translateY(-1px);}
   #homeBtn:active{transform:translateY(0);}
+  #muteBtn{position:absolute;top:14px;right:62px;width:40px;height:40px;border-radius:12px;
+    border:1px solid var(--line);background:rgba(255,255,255,.86);cursor:pointer;font-size:18px;
+    display:flex;align-items:center;justify-content:center;pointer-events:auto;
+    box-shadow:0 6px 22px rgba(120,110,90,.12);transition:transform .08s ease;padding:0;}
+  #muteBtn:hover{transform:translateY(-1px);}
 
   #mystat{position:absolute;left:14px;top:14px;padding:12px 16px;}
   #mystat .big{font-size:30px;font-weight:700;letter-spacing:.02em;line-height:1;}
@@ -191,6 +196,25 @@
   #miCanvas{width:220px;height:220px;border-radius:16px;box-shadow:0 20px 50px rgba(0,0,0,.5);background:#243d38;}
   #miName{font-size:34px;font-weight:900;margin-top:16px;letter-spacing:-.01em;
     text-shadow:0 3px 0 rgba(0,0,0,.3);}
+
+  /* round-end results */
+  #roundEnd{position:fixed;inset:0;z-index:15;display:flex;align-items:center;justify-content:center;
+    background:radial-gradient(120% 120% at 50% 35%, rgba(36,61,56,.96), rgba(16,26,23,.99));
+    opacity:0;transition:opacity .35s ease;pointer-events:none;}
+  #roundEnd.show{opacity:1;}
+  .re-card{text-align:center;color:#eef3f0;width:min(380px,90vw);padding:30px 28px;}
+  .re-crown{font-size:48px;}
+  .re-title{font-size:13px;letter-spacing:.4em;text-transform:uppercase;color:#9fb0aa;margin-top:4px;}
+  .re-winner{font-size:32px;font-weight:900;color:#ffd23f;margin:4px 0 18px;text-shadow:0 3px 0 rgba(0,0,0,.3);}
+  .re-board{text-align:left;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);
+    border-radius:14px;padding:12px 14px;}
+  .re-board .rr{display:flex;align-items:center;gap:9px;padding:4px 0;font-size:14px;}
+  .re-board .rr .rk{width:18px;color:#9fb0aa;font-weight:800;text-align:right;}
+  .re-board .rr .dt{width:12px;height:12px;border-radius:3px;}
+  .re-board .rr .nm{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .re-board .rr .pc{color:#c3d2cc;font-variant-numeric:tabular-nums;}
+  .re-board .rr.me .nm{color:#ffd23f;font-weight:800;}
+  .re-next{margin-top:16px;font-size:12px;color:#9fb0aa;letter-spacing:.1em;}
 </style>
 </head>
 <body>
@@ -204,6 +228,7 @@
   <button id="homeBtn" title="Back to menu" aria-label="Home">
     <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/></svg>
   </button>
+  <button id="muteBtn" title="Sound on/off" aria-label="Mute">🔊</button>
   <div id="board" class="card">
     <h2 id="boardTitle">Leaderboard</h2>
     <div id="boardRows"></div>
@@ -335,6 +360,17 @@
   </div>
 </div>
 
+<!-- ROUND END results -->
+<div id="roundEnd" class="hidden">
+  <div class="re-card">
+    <div class="re-crown">👑</div>
+    <div class="re-title">Round Over</div>
+    <div class="re-winner" id="reWinner">Winner</div>
+    <div class="re-board" id="reBoard"></div>
+    <div class="re-next" id="reNext">Next map starting…</div>
+  </div>
+</div>
+
 <!-- MAP INTRO overlay -->
 <div id="mapIntro" class="hidden">
   <div class="mi-inner">
@@ -358,6 +394,40 @@
 (() => {
   'use strict';
   const cv = document.getElementById('game');
+
+  // ---- SOUND (synthesized via Web Audio — no files to host) ----------------
+  const Sound = (()=>{
+    let ac=null, enabled=true;
+    function ctx(){ if(!ac){ try{ ac=new (window.AudioContext||window.webkitAudioContext)(); }catch(_){ } } return ac; }
+    function unlock(){ const a=ctx(); if(a && a.state==='suspended') a.resume(); }
+    addEventListener('pointerdown', unlock);
+    addEventListener('keydown', unlock);
+    function tone({freq=440, type='sine', dur=0.12, vol=0.2, slideTo=null, delay=0}){
+      const a=ctx(); if(!a||!enabled) return;
+      const t0=a.currentTime+delay;
+      const osc=a.createOscillator(), g=a.createGain();
+      osc.type=type; osc.frequency.setValueAtTime(freq, t0);
+      if(slideTo) osc.frequency.exponentialRampToValueAtTime(slideTo, t0+dur);
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.exponentialRampToValueAtTime(vol, t0+0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0+dur);
+      osc.connect(g); g.connect(a.destination);
+      osc.start(t0); osc.stop(t0+dur+0.02);
+    }
+    return {
+      setEnabled(v){ enabled=v; },
+      isEnabled(){ return enabled; },
+      capture(){ tone({freq:520,type:'triangle',dur:0.10,vol:0.22,slideTo:780}); },
+      coin(){ tone({freq:880,type:'square',dur:0.06,vol:0.15}); tone({freq:1320,type:'square',dur:0.07,vol:0.13,delay:0.06}); },
+      kill(){ tone({freq:300,type:'sawtooth',dur:0.10,vol:0.2,slideTo:520}); },
+      death(){ tone({freq:380,type:'sawtooth',dur:0.30,vol:0.25,slideTo:90}); },
+      boost(){ tone({freq:240,type:'sine',dur:0.25,vol:0.2,slideTo:700}); },
+      cheat(){ tone({freq:200,type:'sawtooth',dur:0.18,vol:0.2,slideTo:900}); tone({freq:600,type:'square',dur:0.18,vol:0.15,delay:0.1}); },
+      win(){ [523,659,784,1047].forEach((f,i)=>tone({freq:f,type:'triangle',dur:0.18,vol:0.22,delay:i*0.12})); },
+      start(){ tone({freq:440,type:'triangle',dur:0.12,vol:0.18}); tone({freq:660,type:'triangle',dur:0.14,vol:0.18,delay:0.12}); },
+      reject(){ tone({freq:200,type:'square',dur:0.2,vol:0.2,slideTo:120}); },
+    };
+  })();
   const ctx = cv.getContext('2d');
   let CELL_SCREEN = 14;                // px per cell (changes with zoom-out power-up)
   const BASE_CELL = 14;
@@ -498,7 +568,7 @@
     ws.onerror = () => { statusEl.textContent='connection error'; };
     ws.onmessage = (ev) => {
       const m = JSON.parse(ev.data);
-      if (m.t==='nameReject'){ onNameReject(m.message); return; }
+      if (m.t==='nameReject'){ Sound.reject(); onNameReject(m.message); return; }
       if (m.t==='welcome'){ myId=m.id; GW=m.w; GH=m.h; activeMode=m.mode||selectedMode;
         boostMs=m.boostMs||10000; cooldownMs=m.cooldownMs||10000;
         blocked = m.blocked ? rleDecode(m.blocked, GW*GH) : null;
@@ -510,17 +580,18 @@
         document.getElementById('boardTitle').textContent = activeMode==='br' ? 'Survivors' : 'Leaderboard';
         document.getElementById('myStatLab').textContent = activeMode==='br' ? 'territory · 1 life' : 'your territory';
         if (store.equip.includes('rich')){ addCoins(100); flashCoins('+100 rich start'); }
+        lastMyArea = null; Sound.start();
         playMapIntro(m.mapName||'The Arena', false);   // "Starting match" intro
       }
       else if (m.t==='full'){ statusEl.textContent='world is full — try again shortly'; }
       else if (m.t==='state'){ applyState(m); }
-      else if (m.t==='death'){ onDeath(m.reason, m.killerId, m.eliminated, m.placement); }
+      else if (m.t==='death'){ Sound.death(); onDeath(m.reason, m.killerId, m.eliminated, m.placement); }
       else if (m.t==='respawn'){ onRespawn(); }
-      else if (m.t==='booted'){ onBooted(m.by); }
+      else if (m.t==='booted'){ Sound.death(); onBooted(m.by); }
       else if (m.t==='roundreset'){ if(m.blocked) blocked=rleDecode(m.blocked, GW*GH); if(m.outline) mapOutline=m.outline; onRoundReset(m.winner, m.mapName); }
-      else if (m.t==='kill'){ const base=(m.coins||20); const c=Math.round(base*coinMult); addCoins(c);
+      else if (m.t==='kill'){ Sound.kill(); const base=(m.coins||20); const c=Math.round(base*coinMult); addCoins(c);
         flashCoins('+'+c + (m.mult>1?(' · x'+m.mult+' streak!'):'')); }
-      else if (m.t==='fullmap'){ const c=Math.round((m.coins||1000)*coinMult); addCoins(c); flashCoins('+'+c+' 100%!'); }
+      else if (m.t==='fullmap'){ Sound.win(); const c=Math.round((m.coins||1000)*coinMult); addCoins(c); flashCoins('+'+c+' 100%!'); }
       else if (m.t==='chat'){ addChat(m.name, m.color, m.text); }
     };
   }
@@ -553,8 +624,14 @@
              `<span class="nm">${escapeHtml(e.name)}</span><span class="pct">${pct}%</span></div>`;
     }).join('');
     const me = ents.get(myId);
-    if (me) myAreaEl.textContent = (me.area/total*100).toFixed(2)+'%';
+    if (me){
+      myAreaEl.textContent = (me.area/total*100).toFixed(2)+'%';
+      // capture "pop" when my territory grows by a meaningful chunk
+      if (lastMyArea!==null && me.area > lastMyArea + 3) Sound.capture();
+      lastMyArea = me.area;
+    }
   }
+  let lastMyArea = null;
   function escapeHtml(s){return (''+s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 
   // ---- INPUT (intent only) ----
@@ -570,7 +647,7 @@
     // Shift activates the rechargeable boost.
     if ((e.code==='ShiftLeft'||e.code==='ShiftRight') && hasBoost && !isDead && boostState==='idle'
         && connected && ws && ws.readyState===1){
-      ws.send(JSON.stringify({t:'boost'})); boostState='active'; boostStart=performance.now();
+      ws.send(JSON.stringify({t:'boost'})); boostState='active'; boostStart=performance.now(); Sound.boost();
       e.preventDefault(); return;
     }
     if (isDead) return;                       // no steering while spectating
@@ -623,11 +700,26 @@
     setTimeout(()=>ni.classList.remove('reject'), 1500);
     ni.focus(); ni.select();
   }
-  // Someone hit 100% — the whole map reset with a new shape.
+  // Someone hit 100% — show round-end results, then the new map intro.
   function onRoundReset(winner, mapName){
     isDead=false; spectateId=null; deathScreen.classList.add('hidden');
-    flashBanner('👑 '+(winner||'Someone')+' conquered the map!', '#ffd23f');
-    playMapIntro(mapName||'New Map', true);
+    Sound.win();
+    // snapshot the final standings from the current entities
+    const total=GW*GH;
+    const list=[...ents.entries()].map(([id,e])=>({id,...e})).sort((a,b)=>b.area-a.area).slice(0,8);
+    const board=document.getElementById('reBoard');
+    board.innerHTML = list.map((e,i)=>{
+      const pct=(e.area/total*100).toFixed(1);
+      const me=e.id===myId?' me':'';
+      return `<div class="rr${me}"><span class="rk">${i+1}</span><span class="dt" style="background:${e.color}"></span>`+
+             `<span class="nm">${escapeHtml(e.name)}</span><span class="pc">${pct}%</span></div>`;
+    }).join('');
+    document.getElementById('reWinner').textContent = winner||'Someone';
+    const re=document.getElementById('roundEnd');
+    re.classList.remove('hidden'); re.classList.add('show');
+    // after a few seconds, fade out and play the new map intro
+    setTimeout(()=>{ re.classList.remove('show'); }, 3400);
+    setTimeout(()=>{ re.classList.add('hidden'); playMapIntro(mapName||'New Map', true); }, 3900);
   }
   // generic center banner
   let bannerTimer=null;
@@ -981,6 +1073,14 @@
   document.getElementById('homeBtn').onclick = goHome;
   document.getElementById('deathMenuBtn').onclick = goHome;
 
+  // sound mute toggle (persisted)
+  const muteBtn=document.getElementById('muteBtn');
+  store.muted = store.muted || false;
+  Sound.setEnabled(!store.muted);
+  function refreshMute(){ muteBtn.textContent = store.muted ? '🔇' : '🔊'; }
+  refreshMute();
+  muteBtn.onclick=()=>{ store.muted=!store.muted; Sound.setEnabled(!store.muted); saveStore(store); refreshMute(); };
+
   // ---- skins helper (color override; null = use player's assigned color) ----
   function skinColor(skId){
     const s = SKINS.find(s=>s.id===skId);
@@ -1095,6 +1195,7 @@
   function useCheat(id){
     if(!connected || isDead) return;
     if((store.cheats[id]||0)<=0) return;
+    Sound.cheat();
     // client-side effects
     if(id==='grand'){ store.cheats[id]--; addCoins(1000); flashCoins('+1000 grand'); saveStore(store); renderCheatBar(); return; }
     if(id==='surge'){ cheatSurge=true; coinMult=coinMult*3; }
