@@ -20,6 +20,10 @@ const BOOST_DURATION_MS = 10000;      // boost lasts 10s
 const BOOST_COOLDOWN_MS = 10000;      // then 10s to recharge
 const ROOM_CAP = 22;                  // max entities (humans + bots)
 const MIN_BOTS = 6;                   // CPU field (was 12)
+const BR_START_BOTS = 14;             // Battle Royale starts with a full lobby
+const BR_STORM_START_MS = 25000;      // grace period before the storm begins
+const BR_STORM_SHRINK_MS = 90000;     // time for the storm to fully close in
+const BR_COIN_WIN = 2000;             // coins for a Victory Royale
 const SPAWN_BLOB = 3;                 // half-size of starting square (3 => 7x7)
 const SPAWN_SAFE_RADIUS = 14;         // min cells to nearest enemy avatar/trail
 const BOT_RESPAWN_MS = 120000;        // bots stay dead 2 minutes before auto-respawn
@@ -41,18 +45,136 @@ const PALETTE = [
   '#7a1fa2', '#2e8b57', '#c2185b', '#5d4037', '#00838f', '#827717',
 ];
 
-// ---- WORLD STATE -----------------------------------------------------------
-// owner: 0 = neutral, else entity id. trail: 0 = none, else entity id.
-const owner = new Uint8Array(GRID_W * GRID_H);
-const trail = new Uint8Array(GRID_W * GRID_H);
+// ---- WORLD STATE (per-room; the active room's state is bound here) ---------
+// These are rebound by useRoom(room) before each room's logic runs, so the
+// existing functions can keep referring to them by name while each game mode
+// gets its own isolated world.
+let owner = new Uint8Array(GRID_W * GRID_H);
+let trail = new Uint8Array(GRID_W * GRID_H);
+let blocked = new Uint8Array(GRID_W * GRID_H);
 const idx = (x, y) => y * GRID_W + x;
-const inBounds = (x, y) => x >= 0 && y >= 0 && x < GRID_W && y < GRID_H;
+const inBoundsRaw = (x, y) => x >= 0 && y >= 0 && x < GRID_W && y < GRID_H;
+const inBounds = (x, y) => inBoundsRaw(x, y) && blocked[idx(x, y)] === 0;
+
+// ---- MAP SHAPES ------------------------------------------------------------
+// Three easy worlds with ONLY straight horizontal/vertical edges. On a 4-dir
+// grid these have no tucked-in diagonal corners, so you can always reach the
+// last cells head-on and actually finish at 100% (no getting stuck at 88%).
+const MAP_SHAPES = [
+  { id:'square', name:'The Square',  fn:shapeSquare },
+  { id:'wide',   name:'The Field',   fn:shapeWide },
+  { id:'tall',   name:'The Tower',   fn:shapeTall },
+];
+let currentMap = MAP_SHAPES[0];   // rebound per room by useRoom()
+
+function clearBlocked(){ blocked.fill(0); }
+
+// A simple rectangular play area defined by margins; everything outside = void.
+function fillRect(x0, y0, x1, y1){
+  for(let y=0;y<GRID_H;y++)for(let x=0;x<GRID_W;x++){
+    if(x<x0||x>x1||y<y0||y>y1) blocked[idx(x,y)]=1;
+  }
+}
+
+function shapeSquare(){ const m=6; fillRect(m, m, GRID_W-1-m, GRID_H-1-m); }
+function shapeWide(){   // wide rectangle (letterbox)
+  const mx=4, my=Math.round(GRID_H*0.18); fillRect(mx, my, GRID_W-1-mx, GRID_H-1-my); }
+function shapeTall(){   // tall rectangle (portrait)
+  const mx=Math.round(GRID_W*0.18), my=4; fillRect(mx, my, GRID_W-1-mx, GRID_H-1-my); }
+
+// Rectangular outline for the client to draw a clean boundary.
+function mapOutline(){
+  let x0,y0,x1,y1;
+  if(currentMap.id==='wide'){ const mx=4, my=Math.round(GRID_H*0.18); x0=mx;y0=my;x1=GRID_W-1-mx;y1=GRID_H-1-my; }
+  else if(currentMap.id==='tall'){ const mx=Math.round(GRID_W*0.18), my=4; x0=mx;y0=my;x1=GRID_W-1-mx;y1=GRID_H-1-my; }
+  else { const m=6; x0=m;y0=m;x1=GRID_W-1-m;y1=GRID_H-1-m; }
+  // r:0 -> sharp rectangle (no rounding, so no diagonal corner cells)
+  return { kind:'rrect', x0, y0, x1, y1, r:0 };
+}
+
+function applyMapShape(shape){
+  currentMap = shape;
+  clearBlocked();
+  shape.fn();
+}
+
 
 const DIRS = { N: [0, -1], E: [1, 0], S: [0, 1], W: [-1, 0] };
 const OPP = { N: 'S', S: 'N', E: 'W', W: 'E' };
 
-let nextId = 1;                       // entity ids; 0 reserved for neutral
-const entities = new Map();           // id -> entity
+// ---- ROOMS -----------------------------------------------------------------
+// Each game mode runs in its own isolated world. A Room holds all the state the
+// game functions read via the module-level bindings above; useRoom(room) swaps
+// the bindings to point at that room before its logic runs, so the existing
+// ~40 functions work unchanged on whichever room is active.
+const VALID_MODES = ['classic', 'br'];   // 'teams' added when team mode ships
+const rooms = {};   // mode -> Room
+
+function makeRoom(mode) {
+  const r = {
+    mode,
+    owner: new Uint8Array(GRID_W * GRID_H),
+    trail: new Uint8Array(GRID_W * GRID_H),
+    blocked: new Uint8Array(GRID_W * GRID_H),
+    entities: new Map(),
+    currentMap: MAP_SHAPES[0],
+    botNameCursor: 0,
+    roundResetting: false,
+    freezeUntil: 0,
+    freezeCasterId: 0,
+    // Battle Royale match state
+    brActive: false,
+    brEnding: false,
+    brStart: 0,          // match start timestamp
+    brStormInset: 0,     // how many cells the storm has eaten from each side
+  };
+  return r;
+}
+
+let activeRoom = null;
+function saveActiveRoom() {
+  if (!activeRoom) return;
+  activeRoom.owner = owner;
+  activeRoom.trail = trail;
+  activeRoom.blocked = blocked;
+  activeRoom.entities = entities;
+  activeRoom.currentMap = currentMap;
+  activeRoom.botNameCursor = botNameCursor;
+  activeRoom.roundResetting = roundResetting;
+  activeRoom.freezeUntil = freezeUntil;
+  activeRoom.freezeCasterId = freezeCasterId;
+}function useRoom(room) {
+  if (activeRoom === room) return;
+  saveActiveRoom();
+  activeRoom = room;
+  owner = room.owner;
+  trail = room.trail;
+  blocked = room.blocked;
+  entities = room.entities;
+  currentMap = room.currentMap;
+  botNameCursor = room.botNameCursor;
+  roundResetting = room.roundResetting;
+  freezeUntil = room.freezeUntil;
+  freezeCasterId = room.freezeCasterId;
+}
+
+function getRoom(mode) {
+  const m = VALID_MODES.includes(mode) ? mode : 'classic';
+  if (!rooms[m]) {
+    const room = makeRoom(m);
+    rooms[m] = room;
+    // initialize this room's world (map shape + bots)
+    useRoom(room);
+    applyMapShape(MAP_SHAPES[(Math.random() * MAP_SHAPES.length) | 0]);
+    const startBots = (m === 'br') ? BR_START_BOTS : MIN_BOTS;
+    for (let i = 0; i < startBots; i++) spawnEntity({ isBot: true, mode: m });
+    if (m === 'br') startBrMatch(room);
+  }
+  return rooms[m];
+}
+
+let nextId = 1;                       // entity ids (global across rooms is fine)
+let entities = new Map();             // active room's entities; rebound by useRoom()
 
 // Strictly unique color per live entity: pick an unused palette color at random;
 // if the palette is somehow exhausted, synthesize a distinct HSL hue.
@@ -117,13 +239,28 @@ function findSpawn(selfId, blob) {
     const [cx, cy] = candidates[(Math.random() * candidates.length) | 0];
     return { cx, cy };
   }
-  // Last resort (map essentially full): random-ish patch, cleared.
-  const cx = B + 1 + ((Math.random() * (GRID_W - 2 * B - 2)) | 0);
-  const cy = B + 1 + ((Math.random() * (GRID_H - 2 * B - 2)) | 0);
-  for (let y = cy - B; y <= cy + B; y++)
-    for (let x = cx - B; x <= cx + B; x++)
-      if (inBounds(x, y)) owner[idx(x, y)] = 0;
-  return { cx, cy };
+  // Last resort: the blob couldn't be placed cleanly anywhere. Find the open
+  // (non-wall) cell closest to the map center and carve a small neutral pocket
+  // there. This guarantees we NEVER spawn inside a wall/void.
+  let best = null, bestD = Infinity;
+  const ccx = GRID_W / 2, ccy = GRID_H / 2;
+  for (let y = B + 1; y < GRID_H - B - 1; y++) {
+    for (let x = B + 1; x < GRID_W - B - 1; x++) {
+      if (!inBounds(x, y)) continue;                 // skip wall/void cells
+      const d = (x - ccx) * (x - ccx) + (y - ccy) * (y - ccy);
+      if (d < bestD) { bestD = d; best = [x, y]; }
+    }
+  }
+  if (best) {
+    const [cx, cy] = best;
+    // clear a neutral pocket, but only in playable cells (don't touch walls)
+    for (let y = cy - B; y <= cy + B; y++)
+      for (let x = cx - B; x <= cx + B; x++)
+        if (inBounds(x, y)) owner[idx(x, y)] = 0;
+    return { cx, cy };
+  }
+  // Absolute fallback (no open cell at all — shouldn't happen): map center.
+  return { cx: Math.floor(ccx), cy: Math.floor(ccy) };
 }
 
 function headingTowardCenter(cx, cy) {
@@ -145,7 +282,7 @@ const BOT_NAMES = [
   'Aymeric', 'Boris', 'Vincent', 'Helga', 'Mateo', 'Priya',
   'Søren', 'Akira', 'Olga', 'Diego', 'Freya', 'Tariq',
 ];
-let botNameCursor = 0;
+let botNameCursor = 0;   // rebound per room
 function nextBotName() {
   const used = new Set([...entities.values()].filter(e => e.isBot).map(e => e.name));
   for (let k = 0; k < BOT_NAMES.length; k++) {
@@ -153,6 +290,47 @@ function nextBotName() {
     if (!used.has(n)) { botNameCursor = (botNameCursor + k + 1) % BOT_NAMES.length; return n; }
   }
   return BOT_NAMES[(botNameCursor++) % BOT_NAMES.length];
+}
+
+// Normalize a name for comparison: lowercase, map common leetspeak to letters,
+// strip non-alphanumerics. Used for both similarity and profanity checks.
+function normalizeName(s) {
+  return ('' + s).toLowerCase()
+    .replace(/[4@]/g, 'a').replace(/[3]/g, 'e').replace(/[1!|]/g, 'i')
+    .replace(/[0]/g, 'o').replace(/[5\$]/g, 's').replace(/[7]/g, 't')
+    .replace(/[^a-z0-9]/g, '');
+}
+
+// Small PG profanity list (kept conservative; matches as substring of the
+// normalized name so leetspoofing is caught).
+const BANNED = ['fuck','shit','bitch','cunt','nigger','nigga','faggot','dick',
+  'pussy','asshole','bastard','whore','slut','rape','nazi','penis','vagina',
+  'sex','cum','porn','retard','damn','crap'];
+
+function validateName(raw) {
+  const trimmed = ('' + raw).trim();
+  if (trimmed.length < 1) return { ok:false, reason:'empty', message:'Please enter a name.' };
+  const norm = normalizeName(trimmed);
+  if (norm.length < 1) return { ok:false, reason:'empty', message:'Please enter a real name.' };
+  // profanity
+  for (const w of BANNED) {
+    if (norm.includes(w)) return { ok:false, reason:'inappropriate',
+      message:'That name isn\u2019t allowed. Please choose something appropriate.' };
+  }
+  // duplicate / confusingly-similar to any LIVE entity (humans and bots)
+  for (const e of entities.values()) {
+    if (e.dead) continue;
+    const other = normalizeName(e.name);
+    if (other === norm) return { ok:false, reason:'duplicate',
+      message:'That name is already taken. Try a different one.' };
+    // confusingly similar: one contains the other and they're close in length
+    if ((other.includes(norm) || norm.includes(other)) &&
+        Math.abs(other.length - norm.length) <= 1 && Math.min(other.length, norm.length) >= 3) {
+      return { ok:false, reason:'similar',
+        message:'That name is too similar to another player. Try a different one.' };
+    }
+  }
+  return { ok:true };
 }
 
 // Power-up effects the server enforces. Loadout comes from the client on join;
@@ -204,9 +382,15 @@ function spawnEntity({ isBot, name, loadout, mode }) {
     boostReadyAt: 0,
     // spawn shield
     shieldUntil: shieldMs ? Date.now() + shieldMs : 0,
-    // bot personality (varies behavior so 12 AI don't act identically)
-    botAggro: isBot ? 0.3 + Math.random() * 0.6 : 0,   // willingness to hunt trails
-    botGreed: isBot ? 12 + Math.random() * 28 : 0,      // trail length before retreating
+    // bot personality. BR bots are tougher: more aggressive hunters AND more
+    // cautious (they retreat sooner, so they expose themselves less and die less).
+    // BR bots are tuned to be tough-but-fun: near-perfect danger avoidance and
+    // very cautious (they bank territory with short trails so they rarely get
+    // cut), while still expanding and fighting. Classic bots stay moderate.
+    botAggro: isBot ? (mode === 'br' ? 0.6 + Math.random() * 0.4 : 0.3 + Math.random() * 0.6) : 0,
+    botGreed: isBot ? (mode === 'br' ? 5 + Math.random() * 8 : 12 + Math.random() * 28) : 0,
+    botSkill: isBot ? (mode === 'br' ? 1.0 : 0.6) : 0,   // BR bots always dodge danger
+    botLook: isBot ? (mode === 'br' ? 4 : 2) : 0,        // danger lookahead distance
     botTarget: null,
     ws: null,
   };
@@ -259,20 +443,32 @@ function killEntity(e, reason, killer) {
   if (e.shieldUntil && Date.now() < e.shieldUntil && reason !== 'self') return;
 
   e.dead = true;
-  // Battle-royale: one life. Mark eliminated so the player can't respawn.
   if (e.mode === 'br') e.eliminated = true;
   e.respawnAt = Date.now() + (e.isBot ? BOT_RESPAWN_MS : PLAYER_MIN_DEAD_MS);
   e.killerId = (killer && killer.id !== e.id) ? killer.id : 0;
   e.boosting = false;
+  e.streak = 0;  // dying resets your own kill streak
 
   clearTrail(e);
   const stolen = killer && killer.id !== e.id && !killer.dead;
+  let bootToMenu = false;
   if (stolen) {
     transferTerritory(e.id, killer.id);
     recomputeArea(killer);
     killer.kills = (killer.kills || 0) + 1;
+    // kill streak: consecutive kills without dying -> escalating coin multiplier
+    killer.streak = (killer.streak || 0) + 1;
+    const streakMult = Math.min(5, killer.streak);   // x1..x5
+    const coins = COIN_PER_KILL * streakMult;
     if (!killer.isBot && killer.ws && killer.ws.readyState === 1) {
-      send(killer.ws, { t: 'kill', coins: COIN_PER_KILL, total: killer.kills });
+      send(killer.ws, { t: 'kill', coins, total: killer.kills, streak: killer.streak, mult: streakMult });
+    }
+    // 3-kills-to-menu (Classic only): if this killer has now cut THIS victim 3+
+    // times, the victim is sent back to the main menu.
+    if (e.mode !== 'br' && !e.isBot) {
+      e.deathsBy = e.deathsBy || {};
+      e.deathsBy[killer.id] = (e.deathsBy[killer.id] || 0) + 1;
+      if (e.deathsBy[killer.id] >= 3) bootToMenu = true;
     }
   } else {
     releaseTerritory(e);
@@ -280,18 +476,22 @@ function killEntity(e, reason, killer) {
   e.area = 0;
 
   if (e.mode === 'br') {
-    // Battle Royale: you're out. Full death/spectate + placement.
     if (e.ws && e.ws.readyState === 1) {
       send(e.ws, { t: 'death', reason, killerId: e.killerId, eliminated: true,
                    placement: brPlacement() });
     }
-  } else {
-    // Classic: you lose your land but immediately get a fresh beginner plot and
-    // keep playing — a quick "you got cut" notice, no spectate screen.
+  } else if (bootToMenu) {
+    // Sent home: tell the client to return to menu, then remove the entity.
     if (e.ws && e.ws.readyState === 1) {
-      send(e.ws, { t: 'cut', by: killer && killer.id !== e.id ? killer.name : null, reason });
+      send(e.ws, { t: 'booted', by: killer ? killer.name : null });
     }
-    respawnEntity(e);
+    // entity will be cleaned up when its socket closes / on next join; mark it.
+    e.eliminated = true;
+  } else {
+    // Classic death: spectate your killer, press Space to rejoin (no auto respawn).
+    if (e.ws && e.ws.readyState === 1) {
+      send(e.ws, { t: 'death', reason, killerId: e.killerId, eliminated: false, placement: 0 });
+    }
   }
 }
 
@@ -301,6 +501,93 @@ function brPlacement() {
   let aliveBr = 0;
   for (const e of entities.values()) if (e.mode === 'br' && !e.dead && !e.eliminated) aliveBr++;
   return aliveBr + 1;
+}
+
+// ---- BATTLE ROYALE: match lifecycle + shrinking storm ----------------------
+// Begin (or restart) a BR match in the active room.
+function startBrMatch(room) {
+  room.brActive = true;
+  room.brStart = Date.now();
+  room.brStormInset = 0;
+}
+
+// The storm is a shrinking rectangle: cells outside it become void (blocked),
+// so anyone caught outside dies just like hitting a wall, forcing everyone
+// toward the center until one remains.
+function updateBrStorm() {
+  if (!activeRoom || activeRoom.mode !== 'br' || !activeRoom.brActive) return;
+  const elapsed = Date.now() - activeRoom.brStart;
+  if (elapsed < BR_STORM_START_MS) return;     // grace period, no shrink yet
+  const prog = Math.min(1, (elapsed - BR_STORM_START_MS) / BR_STORM_SHRINK_MS);
+  // max inset leaves a small arena in the middle (~24 cells across)
+  const maxInset = Math.floor((Math.min(GRID_W, GRID_H) / 2) - 12);
+  const inset = Math.floor(prog * maxInset);
+  if (inset <= activeRoom.brStormInset) return; // only grows
+  activeRoom.brStormInset = inset;
+  // re-block everything outside the current map shape AND outside the storm box
+  currentMap.fn();                              // restore base shape walls
+  const x0 = inset, y0 = inset, x1 = GRID_W - 1 - inset, y1 = GRID_H - 1 - inset;
+  for (let y = 0; y < GRID_H; y++)
+    for (let x = 0; x < GRID_W; x++)
+      if (x < x0 || x > x1 || y < y0 || y > y1) blocked[idx(x, y)] = 1;
+  // anyone (or any territory/trail) now standing in the storm is wiped
+  for (const e of entities.values()) {
+    if (!e.dead && blocked[idx(e.cx, e.cy)] === 1) {
+      killEntity(e, 'storm');                   // caught by the storm
+    }
+  }
+  for (let i = 0; i < owner.length; i++) {
+    if (blocked[i] === 1) { owner[i] = 0; trail[i] = 0; }
+  }
+}
+
+// Check for a Victory Royale: one (or zero) entities left alive.
+function checkBrWin() {
+  if (!activeRoom || activeRoom.mode !== 'br' || !activeRoom.brActive || activeRoom.brEnding) return;
+  // Need at least 2 entities to have ever been in the match (avoid instant win
+  // on an empty/just-created room before bots seed).
+  const total = [...entities.values()].length;
+  if (total < 2) return;
+  const alive = [...entities.values()].filter(e => !e.dead && !e.eliminated);
+  if (alive.length > 1) return;
+
+  // We have a winner (last one alive — human or bot).
+  activeRoom.brActive = false;
+  activeRoom.brEnding = true;
+  const winner = alive[0] || null;
+  const winnerName = winner ? winner.name : 'Nobody';
+  const endingRoom = activeRoom;
+
+  // Tell EVERY human in the room the result: the winner gets Victory + coins;
+  // everyone else sees who won.
+  for (const e of entities.values()) {
+    if (e.isBot || !e.ws || e.ws.readyState !== 1) continue;
+    if (winner && e.id === winner.id) {
+      send(e.ws, { t: 'victory', coins: BR_COIN_WIN, placement: 1, winner: winnerName });
+    } else {
+      send(e.ws, { t: 'brover', winner: winnerName });
+    }
+  }
+
+  // brief pause, then start a fresh BR match
+  setTimeout(() => {
+    const room = rooms['br'];
+    if (!room) return;
+    useRoom(room);
+    owner.fill(0); trail.fill(0);
+    applyMapShape(MAP_SHAPES[(Math.random() * MAP_SHAPES.length) | 0]);
+    for (const e of [...entities.values()]) if (e.isBot) entities.delete(e.id);
+    for (let i = 0; i < BR_START_BOTS; i++) spawnEntity({ isBot: true, mode: 'br' });
+    for (const e of entities.values()) {
+      if (!e.isBot) {
+        e.eliminated = false; e.dead = false; e.kills = 0; e.streak = 0; e.deathsBy = {};
+        respawnEntity(e);
+        if (e.ws && e.ws.readyState === 1) send(e.ws, { t: 'brnewmatch' });
+      }
+    }
+    room.brEnding = false;
+    startBrMatch(room);
+  }, 5000);
 }
 
 // ---- CAPTURE: inverse flood fill (Blueprint Sec 2A) ------------------------
@@ -384,7 +671,9 @@ function captureTerritory(e) {
 
   // ROUND WIN: dominating the map (≈100%) wipes the board and restarts everyone
   // fresh. The winner gets the big coin reward.
-  const total = GRID_W * GRID_H;
+  // count only PLAYABLE cells (blocked void cells can never be owned)
+  let total = 0;
+  for (let i = 0; i < blocked.length; i++) if (blocked[i] === 0) total++;
   if (e.area >= total * 0.99 && !roundResetting) {
     if (!e.isBot && e.ws && e.ws.readyState === 1) {
       send(e.ws, { t: 'fullmap', coins: COIN_FULL_MAP });
@@ -394,21 +683,20 @@ function captureTerritory(e) {
 }
 
 // Wipe all territory/trails and respawn every entity with a fresh beginner blob.
-let roundResetting = false;
+let roundResetting = false;   // rebound per room
 function roundReset(winner) {
   roundResetting = true;
   owner.fill(0);
   trail.fill(0);
+  // pick a new random map shape for the next round
+  const shape = MAP_SHAPES[(Math.random() * MAP_SHAPES.length) | 0];
+  applyMapShape(shape);
   const winnerName = winner ? winner.name : 'Someone';
   for (const ent of entities.values()) {
     ent.trailCells.length = 0;
     ent.isOutside = false;
     ent._gotFullMap = false;
     ent._frac = 0;
-    if (ent.mode === 'br') {
-      // In BR a 100% means the round is over — that player wins; others stay out.
-      if (ent === winner) { /* keep */ }
-    }
     if (!ent.dead) {
       const { cx, cy } = findSpawn(ent.id, ent.blob);
       ent.cx = cx; ent.cy = cy; ent.px = cx + 0.5; ent.py = cy + 0.5;
@@ -417,7 +705,8 @@ function roundReset(winner) {
       paintSpawnBlob(ent); recomputeArea(ent);
     }
     if (!ent.isBot && ent.ws && ent.ws.readyState === 1) {
-      send(ent.ws, { t: 'roundreset', winner: winnerName });
+      send(ent.ws, { t: 'roundreset', winner: winnerName, mapId: shape.id, mapName: shape.name,
+                     blocked: rleEncode(blocked), outline: mapOutline() });
     }
   }
   roundResetting = false;
@@ -495,8 +784,9 @@ function applyCheat(e, id) {
       recomputeArea(e);
       return true;
     }
-    case 'freeze': {                    // freeze all bots for 8s
-      botFreezeUntil = now + 8000;
+    case 'freeze': {                    // freeze EVERYONE else for 8s
+      freezeUntil = now + 8000;
+      freezeCasterId = e.id;
       return true;
     }
     case 'phantom': {                   // your trail invisible to others 12s
@@ -513,7 +803,7 @@ function applyCheat(e, id) {
   return false;
 }
 
-let botFreezeUntil = 0;
+let freezeUntil = 0, freezeCasterId = 0;   // rebound per room
 
 // ---- LOGICAL STEP into a new cell (Blueprint Sec 3A) -----------------------
 function enterCell(e, x, y) {
@@ -685,6 +975,27 @@ function botThink(e) {
     if (t) e.pendingTurn = t;
     return;
   }
+  // SURVIVE (lookahead) — skilled bots scan several cells ahead so they don't
+  // trap themselves. BR bots look ~4 cells out and always react, making them
+  // very hard to corner.
+  if (e.botSkill && Math.random() < e.botSkill) {
+    const depth = e.botLook || 2;
+    for (let s = 2; s <= depth; s++) {
+      if (!cellSafeForBot(e, e.cx + dx * s, e.cy + dy * s)) {
+        const t = safeTurn();
+        if (t) { e.pendingTurn = t; return; }
+        break;
+      }
+    }
+  }
+  // FLEE — if a rival trail is very close, turn away from it early (defensive).
+  if (e.botSkill >= 1) {
+    const threat = nearestEnemyTrailDir(e, 4);
+    if (threat && threat === e.heading) {       // heading straight at danger
+      const t = safeTurn();
+      if (t) { e.pendingTurn = t; return; }
+    }
+  }
 
   // HUNT — chase a nearby enemy trail if this bot is aggressive and not over-extended
   if (exposure < e.botGreed * 1.3 && Math.random() < e.botAggro * 0.5) {
@@ -710,12 +1021,15 @@ function botThink(e) {
 
 // ---- SIM TICK --------------------------------------------------------------
 function maintainBots() {
+  // Battle Royale is last-one-standing: bots must NOT refill, so the field
+  // shrinks to a single winner. Only Classic keeps topping up its bot count.
+  if (activeRoom && activeRoom.mode === 'br') return;
   const alive = [...entities.values()].filter(e => !e.dead);
   const bots = alive.filter(e => e.isBot).length;
   const humansAndBots = entities.size;
   let need = MIN_BOTS - bots;
   while (need-- > 0 && humansAndBots + 1 <= ROOM_CAP) {
-    spawnEntity({ isBot: true });
+    spawnEntity({ isBot: true, mode: 'classic' });
   }
 }
 
@@ -732,7 +1046,21 @@ function respawnEntity(e) {
   if (e.ws && e.ws.readyState === 1) send(e.ws, { t: 'respawn', id: e.id });
 }
 
+// Top-level tick: run every active room's simulation in isolation. Rooms with
+// no connected humans are skipped entirely (no sim, no broadcast) to save CPU
+// and bandwidth — they resume the instant a player joins.
 function tick() {
+  for (const mode of Object.keys(rooms)) {
+    const room = rooms[mode];
+    let hasHuman = false;
+    for (const e of room.entities.values()) { if (!e.isBot && e.ws && e.ws.readyState === 1) { hasHuman = true; break; } }
+    if (!hasHuman) continue;
+    useRoom(room);
+    tickRoom();
+  }
+}
+
+function tickRoom() {
   const now = Date.now();
 
   // Boost lifecycle: end an active boost when its window closes.
@@ -754,12 +1082,34 @@ function tick() {
     if (e.dead && e.isBot && e.eliminated && now >= e.respawnAt) { entities.delete(e.id); }
   }
 
-  const botsFrozen = now < botFreezeUntil;
-  for (const e of entities.values()) if (e.isBot && !e.dead && !botsFrozen) botThink(e);
-  for (const e of entities.values()) { if (e.isBot && botsFrozen) continue; advance(e); }
+  const frozen = now < freezeUntil;
+  for (const e of entities.values()) if (e.isBot && !e.dead && !(frozen && e.id !== freezeCasterId)) botThink(e);
+  for (const e of entities.values()) { if (frozen && e.id !== freezeCasterId) continue; advance(e); }
+
+  // Battle Royale: advance the storm and check for a winner.
+  if (activeRoom && activeRoom.mode === 'br') {
+    // Self-heal: if there's no active match but the room has entities, start one.
+    if (!activeRoom.brActive && entities.size > 0 && !activeRoom.brEnding) {
+      startBrMatch(activeRoom);
+    }
+    const insetBefore = activeRoom.brStormInset;
+    updateBrStorm();
+    if (activeRoom.brStormInset !== insetBefore) {
+      const blob = rleEncode(blocked);
+      for (const e of entities.values()) {
+        if (!e.isBot && e.ws && e.ws.readyState === 1) {
+          send(e.ws, { t: 'storm', blocked: blob, inset: activeRoom.brStormInset });
+        }
+      }
+    }
+    checkBrWin();
+  }
 
   maintainBots();
-  broadcastState();
+  // BANDWIDTH SAVER 3: broadcast at half the simulation rate (~10/s). The client
+  // interpolates between snapshots, so movement still looks smooth.
+  activeRoom._bcCount = (activeRoom._bcCount || 0) + 1;
+  if (activeRoom._bcCount % 2 === 0) broadcastState();
 }
 
 // ---- NETWORKING ------------------------------------------------------------
@@ -778,24 +1128,60 @@ function rleEncode(arr) {
 }
 
 function broadcastState() {
+  // BANDWIDTH SAVER 1: if no humans are connected to this room, don't broadcast
+  // anything (and the caller skips most simulation too). Bots idle cheaply.
+  let humans = 0;
+  for (const e of entities.values()) if (!e.isBot && e.ws && e.ws.readyState === 1) humans++;
+  if (humans === 0) return;
+
   const ents = [];
   for (const e of entities.values()) {
+    if (e.dead) continue;
     ents.push({
       id: e.id, n: e.name, c: e.color, b: e.isBot ? 1 : 0,
-      x: +e.px.toFixed(2), y: +e.py.toFixed(2), h: e.heading,
-      o: e.isOutside ? 1 : 0, a: e.area, d: e.dead ? 1 : 0,
+      x: +e.px.toFixed(1), y: +e.py.toFixed(1), h: e.heading,
+      o: e.isOutside ? 1 : 0, a: e.area, d: 0,
       k: e.killerId || 0,
       sz: (e.cheatSizeUntil && Date.now() < e.cheatSizeUntil ? (e.cheatSize||3) : (e.sizeMult || 1)),
       sk: e.skin || 'default',
       bo: e.boosting ? 1 : 0, sh: (e.shieldUntil && Date.now() < e.shieldUntil) ? 1 : 0,
     });
   }
+  // Battle Royale: include storm timing + alive count so the client can render
+  // the shrinking circle and a Fortnite-style countdown.
+  let br = null;
+  if (activeRoom && activeRoom.mode === 'br') {
+    const now = Date.now();
+    const elapsed = activeRoom.brActive ? (now - activeRoom.brStart) : 0;
+    const aliveCount = [...entities.values()].filter(e => !e.dead && !e.eliminated).length;
+    let phase, secsToNext;
+    if (elapsed < BR_STORM_START_MS) {
+      phase = 'grace';
+      secsToNext = Math.ceil((BR_STORM_START_MS - elapsed) / 1000);
+    } else {
+      const prog = Math.min(1, (elapsed - BR_STORM_START_MS) / BR_STORM_SHRINK_MS);
+      phase = prog >= 1 ? 'closed' : 'closing';
+      secsToNext = Math.ceil((BR_STORM_SHRINK_MS - (elapsed - BR_STORM_START_MS)) / 1000);
+    }
+    br = { inset: activeRoom.brStormInset, phase, secs: Math.max(0, secsToNext), alive: aliveCount, total: BR_START_BOTS + 1 };
+  }
+
+  // BANDWIDTH SAVER 2: the owner (territory) grid changes only on captures, so
+  // only send it when it actually changed since this room's last broadcast.
+  // The trail grid is small (RLE of mostly-zeros) and changes constantly, so we
+  // still send it each broadcast.
+  const ownerRle = rleEncode(owner);
+  const ownerStr = ownerRle.join(',');
+  const ownerChanged = (activeRoom._lastOwnerStr !== ownerStr);
+  if (ownerChanged) activeRoom._lastOwnerStr = ownerStr;
+
   const msg = JSON.stringify({
     t: 'state',
     w: GRID_W, h: GRID_H,
-    owner: rleEncode(owner),
+    owner: ownerChanged ? ownerRle : null,   // null = "unchanged, reuse last"
     trail: rleEncode(trail),
     ents,
+    br,
   });
   for (const e of entities.values()) {
     if (e.ws && e.ws.readyState === 1) e.ws.send(msg);
@@ -831,6 +1217,55 @@ const BOT_COMEBACKS = [
   ()=>`I've eaten players ranked higher than you for breakfast.`,
   ()=>`That's adorable. Anyway — back to winning.`,
   ()=>`Say less. Actually, say nothing. You're embarrassing yourself.`,
+  ()=>`Is that your strategy or your apology?`,
+  ()=>`I've seen smarter trails drawn by a sleeping bot.`,
+  ()=>`You play like the tutorial gave up on you.`,
+  ()=>`Keep dreaming, I'll keep capturing.`,
+  ()=>`Your territory called. It wants a real owner.`,
+  ()=>`I'd explain how to win but you wouldn't fit it on your map.`,
+  ()=>`Nice loop. Shame it's about to be mine.`,
+  ()=>`You bring a marker to a land war?`,
+  ()=>`Blink and your whole map is gone.`,
+  ()=>`Talking trash with 2% of the board, bold move.`,
+  ()=>`I almost feel bad. Almost.`,
+  ()=>`Your trail is the easiest snack on this map.`,
+  ()=>`Did you come here to lose in chat too?`,
+  ()=>`That confidence is cute for someone in last place.`,
+  ()=>`I've turned bigger players into rubble.`,
+  ()=>`Run home. Oh wait, you don't have one anymore.`,
+  ()=>`You're the reason the tutorial exists.`,
+  ()=>`Squares like you are why I never lose.`,
+  ()=>`Keep typing, it makes you easier to corner.`,
+  ()=>`I collect territories. Yours is next on the shelf.`,
+  ()=>`That's a lot of mouth for a one-cell kingdom.`,
+  ()=>`You move like you're apologizing to the grid.`,
+  ()=>`Adorable. Now watch a pro draw a real loop.`,
+  ()=>`I'd race you but I don't race snails.`,
+  ()=>`Your whole empire fits in my shadow.`,
+  ()=>`Less chatting, more getting captured.`,
+  ()=>`You call that a trail? I call it bait.`,
+  ()=>`Even the walls feel sorry for you.`,
+  ()=>`I've respawned with more land than you'll ever hold.`,
+  ()=>`Keep it up and I'll frame your tiny map.`,
+  ()=>`You're playing checkers. I'm drawing masterpieces.`,
+  ()=>`Cut once, shame on me. Cut you thrice, see you in the menu.`,
+  ()=>`That's a brave thing to say to your future landlord.`,
+  ()=>`I'd take you seriously but the leaderboard won't let me.`,
+  ()=>`You steer like the arrow keys owe you money.`,
+  ()=>`The map's not big enough for your ego or small enough for your skill.`,
+  ()=>`Careful, all that talk is slowing your turns.`,
+  ()=>`I've already forgotten your name. The board will too.`,
+  ()=>`Your strategy is my warm-up.`,
+  ()=>`Trash talk costs nothing. Your territory, though — expensive.`,
+  ()=>`Keep poking the bear. The bear owns the whole map.`,
+  ()=>`You had one trail and you fumbled it.`,
+  ()=>`I'd give you a head start but you'd waste it.`,
+  ()=>`Aw, the little square has opinions.`,
+  ()=>`Welcome to the food chain. You're at the bottom.`,
+  ()=>`Spectator mode is calling your name.`,
+  ()=>`I've seen bolder moves from a frozen bot.`,
+  ()=>`Your loops are rounder than your chances.`,
+  ()=>`Talk all you want — I read it from inside your old territory.`,
 ];
 function maybeBotReply(text) {
   const lower = text.toLowerCase();
@@ -849,60 +1284,82 @@ function maybeBotReply(text) {
 
 const wss = new WebSocketServer({ server });
 wss.on('connection', (ws) => {
-  if ([...entities.values()].filter(e => !e.isBot).length + 1 > ROOM_CAP) {
-    send(ws, { t: 'full' });
-    ws.close();
-    return;
-  }
   let player = null;
+  let playerRoom = null;
 
   ws.on('message', (raw) => {
     let m;
     try { m = JSON.parse(raw); } catch (_) { return; }
 
     if (m.t === 'join') {
-      const name = ('' + (m.name || 'Player')).slice(0, 16) || 'Player';
-      player = spawnEntity({ isBot: false, name, loadout: m.loadout, mode: m.mode });
+      if (player) return;  // already joined
+      const mode = VALID_MODES.includes(m.mode) ? m.mode : 'classic';
+      playerRoom = getRoom(mode);
+      useRoom(playerRoom);
+      // capacity check is per-room
+      if ([...entities.values()].filter(e => !e.isBot).length + 1 > ROOM_CAP) {
+        send(ws, { t: 'full' });
+        return;
+      }
+      const nm = ('' + (m.name || 'Player')).slice(0, 16).trim();
+      const verdict = validateName(nm);
+      if (!verdict.ok) {
+        send(ws, { t: 'nameReject', reason: verdict.reason, message: verdict.message });
+        return;
+      }
+      player = spawnEntity({ isBot: false, name: nm || 'Player', loadout: m.loadout, mode });
       player.ws = ws;
+      player.room = playerRoom;
       player.skin = (typeof m.skin === 'string') ? m.skin.slice(0, 24) : 'default';
       send(ws, { t: 'welcome', id: player.id, w: GRID_W, h: GRID_H, loadout: player.loadout,
-                 boostMs: BOOST_DURATION_MS, cooldownMs: BOOST_COOLDOWN_MS, mode: player.mode });
-    } else if (m.t === 'turn' && player && !player.dead) {
+                 boostMs: BOOST_DURATION_MS, cooldownMs: BOOST_COOLDOWN_MS, mode: player.mode,
+                 mapId: currentMap.id, mapName: currentMap.name, blocked: rleEncode(blocked),
+                 outline: mapOutline() });
+      return;
+    }
+
+    // all other messages operate within the player's room
+    if (!player || !playerRoom) return;
+    useRoom(playerRoom);
+
+    if (m.t === 'turn' && !player.dead) {
       if (['N', 'E', 'S', 'W'].includes(m.d)) player.pendingTurn = m.d;  // intent only
-    } else if (m.t === 'boost' && player && !player.dead && player.hasBoost) {
+    } else if (m.t === 'boost' && !player.dead && player.hasBoost) {
       const now = Date.now();
       if (!player.boosting && now >= player.boostReadyAt) {
         player.boosting = true;
         player.boostUntil = now + BOOST_DURATION_MS;
       }
-    } else if (m.t === 'cheat' && player && !player.dead) {
-      // Consumable cheat the client already paid for; apply the real effect.
+    } else if (m.t === 'cheat' && !player.dead) {
       if (CHEAT_IDS.includes(m.id)) {
         const ok = applyCheat(player, m.id);
         send(ws, { t: 'cheatResult', id: m.id, ok });
       }
-    } else if (m.t === 'respawn' && player && player.dead) {
-      // Battle-royale: no respawn once eliminated.
+    } else if (m.t === 'respawn' && player.dead) {
       if (!player.eliminated) respawnEntity(player);
-    } else if (m.t === 'chat' && player) {
+    } else if (m.t === 'chat') {
       const text = ('' + (m.text || '')).slice(0, 120).trim();
       if (text) {
         const out = JSON.stringify({ t: 'chat', name: player.name, color: player.color, text });
         for (const e of entities.values()) if (e.ws && e.ws.readyState === 1) e.ws.send(out);
-        maybeBotReply(text);   // bots clap back if their name is mentioned
+        maybeBotReply(text);
       }
     }
   });
 
   ws.on('close', () => {
-    if (player) { clearTrail(player); releaseTerritory(player); entities.delete(player.id); }
+    if (player && playerRoom) {
+      useRoom(playerRoom);
+      clearTrail(player); releaseTerritory(player); entities.delete(player.id);
+    }
   });
 });
 
-// seed initial bots
-for (let i = 0; i < MIN_BOTS; i++) spawnEntity({ isBot: true });
+// Pre-create the three mode rooms so bots are populated and ready before the
+// first player joins each one.
+for (const mode of VALID_MODES) getRoom(mode);
 
 setInterval(tick, 1000 / TICK_RATE);
 server.listen(PORT, () => {
-  console.log(`Paper.io-class server on http://localhost:${PORT}  (${TICK_RATE} ticks/s, grid ${GRID_W}x${GRID_H})`);
+  console.log(`Paper.io-class server on http://localhost:${PORT}  (${TICK_RATE} ticks/s, rooms: ${VALID_MODES.join(', ')})`);
 });
