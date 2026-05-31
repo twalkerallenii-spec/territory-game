@@ -53,78 +53,39 @@ const inBoundsRaw = (x, y) => x >= 0 && y >= 0 && x < GRID_W && y < GRID_H;
 const inBounds = (x, y) => inBoundsRaw(x, y) && blocked[idx(x, y)] === 0;
 
 // ---- MAP SHAPES ------------------------------------------------------------
-// Three worlds only, all with soft/rounded edges (no harsh corners or corridors).
-// Each shape fills `blocked` so only the playable region is open.
+// Three easy worlds with ONLY straight horizontal/vertical edges. On a 4-dir
+// grid these have no tucked-in diagonal corners, so you can always reach the
+// last cells head-on and actually finish at 100% (no getting stuck at 88%).
 const MAP_SHAPES = [
-  { id:'circle',   name:'The Colosseum', fn:shapeCircle },
-  { id:'square',   name:'The Arena',     fn:shapeRoundedSquare },
-  { id:'triangle', name:'The Pyramid',   fn:shapeRoundedTriangle },
+  { id:'square', name:'The Square',  fn:shapeSquare },
+  { id:'wide',   name:'The Field',   fn:shapeWide },
+  { id:'tall',   name:'The Tower',   fn:shapeTall },
 ];
 let currentMap = MAP_SHAPES[0];   // rebound per room by useRoom()
 
 function clearBlocked(){ blocked.fill(0); }
 
-function shapeCircle(){
-  const cx=GRID_W/2, cy=GRID_H/2, R=Math.min(GRID_W,GRID_H)/2 - 3;
+// A simple rectangular play area defined by margins; everything outside = void.
+function fillRect(x0, y0, x1, y1){
   for(let y=0;y<GRID_H;y++)for(let x=0;x<GRID_W;x++){
-    const dx=x-cx+0.5, dy=y-cy+0.5; if(dx*dx+dy*dy > R*R) blocked[idx(x,y)]=1;
+    if(x<x0||x>x1||y<y0||y>y1) blocked[idx(x,y)]=1;
   }
 }
 
-// Square with generously rounded corners (a "squircle"-style rounded rect).
-function shapeRoundedSquare(){
-  const m=4;                                   // margin from the map edge
-  const x0=m, y0=m, x1=GRID_W-1-m, y1=GRID_H-1-m;
-  const r=Math.min(GRID_W,GRID_H)*0.22;        // corner radius
-  for(let y=0;y<GRID_H;y++)for(let x=0;x<GRID_W;x++){
-    let bad = (x<x0||x>x1||y<y0||y>y1);
-    if(!bad){
-      // round each corner: if we're in a corner box, require distance<=r
-      const inLeft=x<x0+r, inRight=x>x1-r, inTop=y<y0+r, inBot=y>y1-r;
-      if((inLeft||inRight)&&(inTop||inBot)){
-        const ccx = inLeft ? x0+r : x1-r;
-        const ccy = inTop  ? y0+r : y1-r;
-        const dx=x-ccx, dy=y-ccy;
-        if(dx*dx+dy*dy > r*r) bad=true;
-      }
-    }
-    if(bad) blocked[idx(x,y)]=1;
-  }
-}
+function shapeSquare(){ const m=6; fillRect(m, m, GRID_W-1-m, GRID_H-1-m); }
+function shapeWide(){   // wide rectangle (letterbox)
+  const mx=4, my=Math.round(GRID_H*0.18); fillRect(mx, my, GRID_W-1-mx, GRID_H-1-my); }
+function shapeTall(){   // tall rectangle (portrait)
+  const mx=Math.round(GRID_W*0.18), my=4; fillRect(mx, my, GRID_W-1-mx, GRID_H-1-my); }
 
-// Equilateral-ish triangle (point up) with rounded corners via a small inward
-// inset: a cell is playable if it's inside all three edges by a soft margin.
-function shapeRoundedTriangle(){
-  // Wide 3-point triangle: apex near top-center, base corners near bottom-left
-  // and bottom-right, so all three points reach out toward the map corners.
-  const cx=GRID_W/2, top=4, bot=GRID_H-5;
-  const halfBase=(GRID_W/2)-3;
-  const ax=cx, ay=top, bx=cx-halfBase, by=bot, cxr=cx+halfBase, cyr=bot;
-  const soft=4;   // small inward inset so the edge isn't right on the border
-  function sideSign(px,py, x1,y1,x2,y2){ return (x2-x1)*(py-y1)-(y2-y1)*(px-x1); }
-  for(let y=0;y<GRID_H;y++)for(let x=0;x<GRID_W;x++){
-    const d1=sideSign(x,y, ax,ay, bx,by);
-    const d2=sideSign(x,y, bx,by, cxr,cyr);
-    const d3=sideSign(x,y, cxr,cyr, ax,ay);
-    const inside = (d1<=-soft) && (d2<=-soft) && (d3<=-soft);
-    if(!inside) blocked[idx(x,y)]=1;
-  }
-}
-
-// Expose the current map's smooth outline (in cell coords) so the client can
-// draw a clean anti-aliased boundary over the gridded play area.
+// Rectangular outline for the client to draw a clean boundary.
 function mapOutline(){
-  const cx=GRID_W/2, cy=GRID_H/2;
-  if(currentMap.id==='circle'){
-    return { kind:'circle', cx, cy, r:Math.min(GRID_W,GRID_H)/2 - 3 };
-  }
-  if(currentMap.id==='triangle'){
-    const top=4, bot=GRID_H-5, halfBase=(GRID_W/2)-3;
-    return { kind:'poly', pts:[[cx,top],[cx-halfBase,bot],[cx+halfBase,bot]] };
-  }
-  // square (rounded)
-  const m=4, r=Math.min(GRID_W,GRID_H)*0.22;
-  return { kind:'rrect', x0:m, y0:m, x1:GRID_W-1-m, y1:GRID_H-1-m, r };
+  let x0,y0,x1,y1;
+  if(currentMap.id==='wide'){ const mx=4, my=Math.round(GRID_H*0.18); x0=mx;y0=my;x1=GRID_W-1-mx;y1=GRID_H-1-my; }
+  else if(currentMap.id==='tall'){ const mx=Math.round(GRID_W*0.18), my=4; x0=mx;y0=my;x1=GRID_W-1-mx;y1=GRID_H-1-my; }
+  else { const m=6; x0=m;y0=m;x1=GRID_W-1-m;y1=GRID_H-1-m; }
+  // r:0 -> sharp rectangle (no rounding, so no diagonal corner cells)
+  return { kind:'rrect', x0, y0, x1, y1, r:0 };
 }
 
 function applyMapShape(shape){
