@@ -588,6 +588,9 @@
       else if (m.t==='death'){ Sound.death(); onDeath(m.reason, m.killerId, m.eliminated, m.placement); }
       else if (m.t==='respawn'){ onRespawn(); }
       else if (m.t==='booted'){ Sound.death(); onBooted(m.by); }
+      else if (m.t==='victory'){ onVictory(m.coins, m.placement); }
+      else if (m.t==='brnewmatch'){ onBrNewMatch(); }
+      else if (m.t==='storm'){ if(m.blocked) blocked=rleDecode(m.blocked, GW*GH); }
       else if (m.t==='roundreset'){ if(m.blocked) blocked=rleDecode(m.blocked, GW*GH); if(m.outline) mapOutline=m.outline; onRoundReset(m.winner, m.mapName); }
       else if (m.t==='kill'){ Sound.kill(); const base=(m.coins||20); const c=Math.round(base*coinMult); addCoins(c);
         flashCoins('+'+c + (m.mult>1?(' · x'+m.mult+' streak!'):'')); }
@@ -674,7 +677,8 @@
       const br = document.getElementById('brResult');
       document.getElementById('brPlace').textContent = '#'+(placement||'?');
       document.getElementById('brHead').textContent = (placement===1)?'Victory Royale!':'Eliminated';
-      document.getElementById('brSub').textContent = killer ? ('Cut down by '+killer.name+'.') : 'You were cut down.';
+      document.getElementById('brSub').textContent = (reason==='storm') ? 'Caught in the storm.' :
+        (killer ? ('Cut down by '+killer.name+'.') : 'You were cut down.');
       br.classList.remove('hidden');
       return;
     }
@@ -684,6 +688,27 @@
     deathScreen.classList.remove('hidden');
   }
   function onRespawn(){ isDead=false; spectateId=null; deathScreen.classList.add('hidden'); }
+
+  // Battle Royale: you're the last one standing — Victory Royale.
+  function onVictory(coins, placement){
+    isDead=false; spectateId=null;
+    deathScreen.classList.add('hidden');
+    const c=Math.round((coins||2000)*coinMult); addCoins(c);
+    Sound.win();
+    const br=document.getElementById('brResult');
+    document.getElementById('brPlace').textContent='#1';
+    document.getElementById('brHead').textContent='Victory Royale! 👑';
+    document.getElementById('brSub').textContent='Last one standing. +'+c+' coins!';
+    br.classList.remove('hidden');
+  }
+  // A fresh BR match is starting — clear the results and resume play.
+  function onBrNewMatch(){
+    isDead=false; spectateId=null;
+    document.getElementById('brResult').classList.add('hidden');
+    deathScreen.classList.add('hidden');
+    lastMyArea=null;
+    flashBanner('🪂 New Battle Royale — drop in!', '#ffd23f');
+  }
 
   // Sent to the main menu after being cut 3× by the same player (Classic).
   function onBooted(by){

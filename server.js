@@ -20,6 +20,10 @@ const BOOST_DURATION_MS = 10000;      // boost lasts 10s
 const BOOST_COOLDOWN_MS = 10000;      // then 10s to recharge
 const ROOM_CAP = 22;                  // max entities (humans + bots)
 const MIN_BOTS = 6;                   // CPU field (was 12)
+const BR_START_BOTS = 14;             // Battle Royale starts with a full lobby
+const BR_STORM_START_MS = 25000;      // grace period before the storm begins
+const BR_STORM_SHRINK_MS = 90000;     // time for the storm to fully close in
+const BR_COIN_WIN = 2000;             // coins for a Victory Royale
 const SPAWN_BLOB = 3;                 // half-size of starting square (3 => 7x7)
 const SPAWN_SAFE_RADIUS = 14;         // min cells to nearest enemy avatar/trail
 const BOT_RESPAWN_MS = 120000;        // bots stay dead 2 minutes before auto-respawn
@@ -118,6 +122,10 @@ function makeRoom(mode) {
     roundResetting: false,
     freezeUntil: 0,
     freezeCasterId: 0,
+    // Battle Royale match state
+    brActive: false,
+    brStart: 0,          // match start timestamp
+    brStormInset: 0,     // how many cells the storm has eaten from each side
   };
   return r;
 }
@@ -134,8 +142,7 @@ function saveActiveRoom() {
   activeRoom.roundResetting = roundResetting;
   activeRoom.freezeUntil = freezeUntil;
   activeRoom.freezeCasterId = freezeCasterId;
-}
-function useRoom(room) {
+}function useRoom(room) {
   if (activeRoom === room) return;
   saveActiveRoom();
   activeRoom = room;
@@ -158,7 +165,9 @@ function getRoom(mode) {
     // initialize this room's world (map shape + bots)
     useRoom(room);
     applyMapShape(MAP_SHAPES[(Math.random() * MAP_SHAPES.length) | 0]);
-    for (let i = 0; i < MIN_BOTS; i++) spawnEntity({ isBot: true, mode: m });
+    const startBots = (m === 'br') ? BR_START_BOTS : MIN_BOTS;
+    for (let i = 0; i < startBots; i++) spawnEntity({ isBot: true, mode: m });
+    if (m === 'br') startBrMatch(room);
   }
   return rooms[m];
 }
@@ -470,6 +479,78 @@ function brPlacement() {
   let aliveBr = 0;
   for (const e of entities.values()) if (e.mode === 'br' && !e.dead && !e.eliminated) aliveBr++;
   return aliveBr + 1;
+}
+
+// ---- BATTLE ROYALE: match lifecycle + shrinking storm ----------------------
+// Begin (or restart) a BR match in the active room.
+function startBrMatch(room) {
+  room.brActive = true;
+  room.brStart = Date.now();
+  room.brStormInset = 0;
+}
+
+// The storm is a shrinking rectangle: cells outside it become void (blocked),
+// so anyone caught outside dies just like hitting a wall, forcing everyone
+// toward the center until one remains.
+function updateBrStorm() {
+  if (!activeRoom || activeRoom.mode !== 'br' || !activeRoom.brActive) return;
+  const elapsed = Date.now() - activeRoom.brStart;
+  if (elapsed < BR_STORM_START_MS) return;     // grace period, no shrink yet
+  const prog = Math.min(1, (elapsed - BR_STORM_START_MS) / BR_STORM_SHRINK_MS);
+  // max inset leaves a small arena in the middle (~24 cells across)
+  const maxInset = Math.floor((Math.min(GRID_W, GRID_H) / 2) - 12);
+  const inset = Math.floor(prog * maxInset);
+  if (inset <= activeRoom.brStormInset) return; // only grows
+  activeRoom.brStormInset = inset;
+  // re-block everything outside the current map shape AND outside the storm box
+  currentMap.fn();                              // restore base shape walls
+  const x0 = inset, y0 = inset, x1 = GRID_W - 1 - inset, y1 = GRID_H - 1 - inset;
+  for (let y = 0; y < GRID_H; y++)
+    for (let x = 0; x < GRID_W; x++)
+      if (x < x0 || x > x1 || y < y0 || y > y1) blocked[idx(x, y)] = 1;
+  // anyone (or any territory/trail) now standing in the storm is wiped
+  for (const e of entities.values()) {
+    if (!e.dead && blocked[idx(e.cx, e.cy)] === 1) {
+      killEntity(e, 'storm');                   // caught by the storm
+    }
+  }
+  for (let i = 0; i < owner.length; i++) {
+    if (blocked[i] === 1) { owner[i] = 0; trail[i] = 0; }
+  }
+}
+
+// Check for a Victory Royale: exactly one (or zero) entities left alive.
+function checkBrWin() {
+  if (!activeRoom || activeRoom.mode !== 'br' || !activeRoom.brActive) return;
+  const alive = [...entities.values()].filter(e => !e.dead && !e.eliminated);
+  if (alive.length > 1) return;
+  // we have a winner (or empty room)
+  activeRoom.brActive = false;
+  const winner = alive[0] || null;
+  if (winner && !winner.isBot && winner.ws && winner.ws.readyState === 1) {
+    send(winner.ws, { t: 'victory', coins: BR_COIN_WIN, placement: 1 });
+  }
+  // brief pause, then start a fresh BR match: revive everyone with new spawns
+  setTimeout(() => {
+    const room = rooms['br'];
+    if (!room) return;
+    useRoom(room);
+    // reset world
+    owner.fill(0); trail.fill(0);
+    applyMapShape(MAP_SHAPES[(Math.random() * MAP_SHAPES.length) | 0]);
+    // remove all bots, respawn a fresh full field
+    for (const e of [...entities.values()]) if (e.isBot) entities.delete(e.id);
+    for (let i = 0; i < BR_START_BOTS; i++) spawnEntity({ isBot: true, mode: 'br' });
+    // revive human players for the new match
+    for (const e of entities.values()) {
+      if (!e.isBot) {
+        e.eliminated = false; e.dead = false; e.kills = 0; e.streak = 0; e.deathsBy = {};
+        respawnEntity(e);
+        if (e.ws && e.ws.readyState === 1) send(e.ws, { t: 'brnewmatch' });
+      }
+    }
+    startBrMatch(room);
+  }, 4000);
 }
 
 // ---- CAPTURE: inverse flood fill (Blueprint Sec 2A) ------------------------
@@ -882,12 +963,15 @@ function botThink(e) {
 
 // ---- SIM TICK --------------------------------------------------------------
 function maintainBots() {
+  // Battle Royale is last-one-standing: bots must NOT refill, so the field
+  // shrinks to a single winner. Only Classic keeps topping up its bot count.
+  if (activeRoom && activeRoom.mode === 'br') return;
   const alive = [...entities.values()].filter(e => !e.dead);
   const bots = alive.filter(e => e.isBot).length;
   const humansAndBots = entities.size;
   let need = MIN_BOTS - bots;
   while (need-- > 0 && humansAndBots + 1 <= ROOM_CAP) {
-    spawnEntity({ isBot: true });
+    spawnEntity({ isBot: true, mode: 'classic' });
   }
 }
 
@@ -937,6 +1021,22 @@ function tickRoom() {
   const frozen = now < freezeUntil;
   for (const e of entities.values()) if (e.isBot && !e.dead && !(frozen && e.id !== freezeCasterId)) botThink(e);
   for (const e of entities.values()) { if (frozen && e.id !== freezeCasterId) continue; advance(e); }
+
+  // Battle Royale: advance the storm and check for a winner.
+  if (activeRoom && activeRoom.mode === 'br') {
+    const insetBefore = activeRoom.brStormInset;
+    updateBrStorm();
+    // if the storm grew, re-send the blocked grid so clients see it close in
+    if (activeRoom.brStormInset !== insetBefore) {
+      const blob = rleEncode(blocked);
+      for (const e of entities.values()) {
+        if (!e.isBot && e.ws && e.ws.readyState === 1) {
+          send(e.ws, { t: 'storm', blocked: blob, inset: activeRoom.brStormInset });
+        }
+      }
+    }
+    checkBrWin();
+  }
 
   maintainBots();
   broadcastState();
