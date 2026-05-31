@@ -186,16 +186,17 @@
   @keyframes rejectShake{0%,100%{transform:translateX(0)}25%{transform:translateX(-6px)}75%{transform:translateX(6px)}}
 
   /* map intro: "Starting match" -> name -> top-view */
-  #mapIntro{position:fixed;inset:0;z-index:16;display:flex;align-items:center;justify-content:center;
-    background:radial-gradient(120% 120% at 50% 40%, rgba(36,61,56,.96), rgba(16,26,23,.99));
-    opacity:0;transition:opacity .35s ease;pointer-events:none;}
+  #mapIntro{position:fixed;top:64px;left:50%;transform:translateX(-50%);z-index:16;
+    display:flex;align-items:center;justify-content:center;
+    opacity:0;transition:opacity .3s ease;pointer-events:none;}
   #mapIntro.show{opacity:1;}
-  .mi-inner{text-align:center;color:#eef3f0;transform:scale(.9);transition:transform .4s cubic-bezier(.2,1.3,.4,1);}
-  #mapIntro.show .mi-inner{transform:scale(1);}
-  #miStarting{font-size:14px;letter-spacing:.4em;text-transform:uppercase;color:#ffd23f;font-weight:700;margin-bottom:14px;}
-  #miCanvas{width:220px;height:220px;border-radius:16px;box-shadow:0 20px 50px rgba(0,0,0,.5);background:#243d38;}
-  #miName{font-size:34px;font-weight:900;margin-top:16px;letter-spacing:-.01em;
-    text-shadow:0 3px 0 rgba(0,0,0,.3);}
+  .mi-inner{display:flex;align-items:center;gap:12px;color:#eef3f0;
+    background:rgba(20,32,28,.9);border:1px solid rgba(255,255,255,.12);
+    border-radius:14px;padding:10px 16px;box-shadow:0 10px 30px rgba(0,0,0,.35);}
+  #mapIntro.show .mi-inner{transform:none;}
+  #miStarting{font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:#ffd23f;font-weight:700;}
+  #miCanvas{width:46px;height:46px;border-radius:8px;background:#243d38;}
+  #miName{font-size:18px;font-weight:800;letter-spacing:-.01em;}
 
   /* round-end results */
   #roundEnd{position:fixed;inset:0;z-index:15;display:flex;align-items:center;justify-content:center;
@@ -514,6 +515,16 @@
     {id:'storm',       ic:'⛈️', nm:'Storm Chaser',  ds:'Win a BR that reaches the final circle.'},
     {id:'comeback',    ic:'💪', nm:'Comeback Kid',  ds:'Win after being under 5% territory.'},
     {id:'centurion',   ic:'⚔️', nm:'Centurion',     ds:'100 total kills (lifetime).'},
+    {id:'double',      ic:'⚡', nm:'Double Kill',    ds:'Cut 2 players within 3 seconds.'},
+    {id:'untouchable', ic:'✨', nm:'Untouchable',    ds:'Win a BR without ever boosting.'},
+    {id:'speeddemon',  ic:'🚀', nm:'Speed Demon',    ds:'Get a kill while using Mach Speed.'},
+    {id:'bigspender',  ic:'💸', nm:'Big Spender',    ds:'Spend 10,000 coins total.'},
+    {id:'loaded',      ic:'🤑', nm:'Loaded',         ds:'Hold 50,000 coins at once.'},
+    {id:'cheatlord',   ic:'🃏', nm:'Cheat Lord',     ds:'Use 10 cheats total.'},
+    {id:'marathoner',  ic:'🏃', nm:'Marathoner',     ds:'Play 25 matches.'},
+    {id:'quarter',     ic:'📐', nm:'Quarter Master', ds:'Control 25% of the map at once.'},
+    {id:'bothunter',   ic:'🎯', nm:'Bot Hunter',     ds:'Get 50 kills total.'},
+    {id:'flawless',    ic:'💎', nm:'Flawless',       ds:'Win a round without being cut.'},
   ];
   function awardTrophy(id){
     store.trophies = store.trophies || {};
@@ -550,9 +561,12 @@
   store.cheats = store.cheats || {};                // cheat id -> count owned (consumable)
   store.trophies = store.trophies || {};            // trophy id -> unlock timestamp
   store.lifetimeKills = store.lifetimeKills || 0;    // total kills across all games
+  store.coinsSpent = store.coinsSpent || 0;          // total coins spent (shop+cheats)
+  store.cheatsUsed = store.cheatsUsed || 0;          // total cheats activated
+  store.matchesPlayed = store.matchesPlayed || 0;    // total matches joined
   saveStore(store);
 
-  function addCoins(n){ store.coins += n; saveStore(store); refreshCoinUI(); }
+  function addCoins(n){ store.coins += n; saveStore(store); refreshCoinUI(); if(store.coins>=50000) awardTrophy('loaded'); }
   function refreshCoinUI(){
     document.getElementById('coinAmt').textContent = store.coins;
     const sc=document.getElementById('shopCoins'); if(sc) sc.textContent=store.coins;
@@ -627,6 +641,9 @@
         document.getElementById('myStatLab').textContent = activeMode==='br' ? 'territory · 1 life' : 'your territory';
         if (store.equip.includes('rich')){ addCoins(100); flashCoins('+100 rich start'); }
         lastMyArea = null; lowestPct = 100; Sound.start();
+        boostedThisLife=false; cutThisRound=false; machUntil=0; lastKillT=0;
+        store.matchesPlayed=(store.matchesPlayed||0)+1; saveStore(store);
+        if(store.matchesPlayed>=25) awardTrophy('marathoner');
         playMapIntro(m.mapName||'The Arena', false);   // "Starting match" intro
       }
       else if (m.t==='full'){ statusEl.textContent='world is full — try again shortly'; }
@@ -641,12 +658,19 @@
       else if (m.t==='roundreset'){ if(m.blocked) blocked=rleDecode(m.blocked, GW*GH); if(m.outline) mapOutline=m.outline; onRoundReset(m.winner, m.mapName); }
       else if (m.t==='kill'){ Sound.kill(); const base=(m.coins||20); const c=Math.round(base*coinMult); addCoins(c);
         flashCoins('+'+c + (m.mult>1?(' · x'+m.mult+' streak!'):''));
-        // trophies: first blood, hat trick, spree, centurion
         store.lifetimeKills=(store.lifetimeKills||0)+1; saveStore(store);
         awardTrophy('first_blood');
         if((m.total||0)>=3) awardTrophy('hat_trick');
         if((m.total||0)>=5) awardTrophy('spree');
+        if(store.lifetimeKills>=50) awardTrophy('bothunter');
         if(store.lifetimeKills>=100) awardTrophy('centurion');
+        // Double Kill: two cuts within 3s
+        const now=performance.now();
+        if(lastKillT && now-lastKillT<=3000) awardTrophy('double');
+        lastKillT=now;
+        // Speed Demon: kill while Mach Speed cheat is active
+        if(now < machUntil) awardTrophy('speeddemon');
+        // Untouchable/Flawless tracking: a kill doesn't break these; being cut does
       }
       else if (m.t==='fullmap'){ Sound.win(); const c=Math.round((m.coins||1000)*coinMult); addCoins(c); flashCoins('+'+c+' 100%!'); awardTrophy('conqueror'); }
       else if (m.t==='chat'){ addChat(m.name, m.color, m.text); }
@@ -706,12 +730,17 @@
       lastMyArea = me.area;
       // trophy tracking
       const pct = me.area/total*100;
+      if (pct >= 25) awardTrophy('quarter');
       if (pct >= 50) awardTrophy('baron');
       if (pct > 0 && pct < lowestPct) lowestPct = pct;   // track for comeback
     }
   }
   let lastMyArea = null;
   let lowestPct = 100;   // lowest territory % this life (for Comeback Kid)
+  let lastKillT = 0;     // timestamp of last kill (for Double Kill)
+  let machUntil = 0;     // mach-speed active until (for Speed Demon)
+  let boostedThisLife = false;  // did I boost this life (for Untouchable)
+  let cutThisRound = false;     // was I cut this round (for Flawless)
   function escapeHtml(s){return (''+s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 
   // ---- INPUT (intent only) ----
@@ -727,7 +756,7 @@
     // Shift activates the rechargeable boost.
     if ((e.code==='ShiftLeft'||e.code==='ShiftRight') && hasBoost && !isDead && boostState==='idle'
         && connected && ws && ws.readyState===1){
-      ws.send(JSON.stringify({t:'boost'})); boostState='active'; boostStart=performance.now(); Sound.boost();
+      ws.send(JSON.stringify({t:'boost'})); boostState='active'; boostStart=performance.now(); Sound.boost(); boostedThisLife=true;
       e.preventDefault(); return;
     }
     if (isDead) return;                       // no steering while spectating
@@ -746,6 +775,7 @@
   // ---- DEATH / RESPAWN ----
   function onDeath(reason, killerId, eliminated, placement){
     isDead = true;
+    if (reason==='cut' || killerId) cutThisRound = true;   // a rival cut me -> not flawless
     spectateId = (killerId && ents.has(killerId)) ? killerId : null;
     const killer = spectateId ? ents.get(spectateId) : null;
 
@@ -765,7 +795,7 @@
     spectateLabel.textContent = killer ? ('Spectating '+killer.name) : 'Spectating the board';
     deathScreen.classList.remove('hidden');
   }
-  function onRespawn(){ isDead=false; spectateId=null; deathScreen.classList.add('hidden'); lastMyArea=null; lowestPct=100; }
+  function onRespawn(){ isDead=false; spectateId=null; deathScreen.classList.add('hidden'); lastMyArea=null; lowestPct=100; boostedThisLife=false; }
 
   // Battle Royale: you're the last one standing — Victory Royale.
   function onVictory(coins, placement){
@@ -783,13 +813,15 @@
     awardTrophy('survivor');                       // winning is also top-3
     if (brState && brState.phase==='closed') awardTrophy('storm');
     if (lowestPct < 5) awardTrophy('comeback');
+    if (!boostedThisLife) awardTrophy('untouchable');
+    if (!cutThisRound) awardTrophy('flawless');
   }
   // A fresh BR match is starting — clear the results and resume play.
   function onBrNewMatch(){
     isDead=false; spectateId=null;
     document.getElementById('brResult').classList.add('hidden');
     deathScreen.classList.add('hidden');
-    lastMyArea=null; lowestPct=100;
+    lastMyArea=null; lowestPct=100; boostedThisLife=false; cutThisRound=false; machUntil=0;
     flashBanner('🪂 New Battle Royale — drop in!', '#ffd23f');
   }
   // Someone else won the BR (you were already out) — show who.
@@ -857,8 +889,8 @@
     ov.classList.add('show');
     // draw a top-view of the whole map onto the intro canvas
     drawMapPreview();
-    setTimeout(()=>{ ov.classList.remove('show'); }, 2600);
-    setTimeout(()=>{ ov.classList.add('hidden'); }, 3100);
+    setTimeout(()=>{ ov.classList.remove('show'); }, 1800);
+    setTimeout(()=>{ ov.classList.add('hidden'); }, 2200);
   }
   function drawMapPreview(){
     const c=document.getElementById('miCanvas'); if(!c) return;
@@ -1243,7 +1275,7 @@
     }).join('');
     grid.querySelectorAll('[data-buy]').forEach(b=>b.onclick=()=>{
       const p=SHOP.find(s=>s.id===b.dataset.buy);
-      if(store.coins>=p.cost){ store.coins-=p.cost; store.owned[p.id]=true; saveStore(store); renderShop(); refreshCoinUI(); }
+      if(store.coins>=p.cost){ store.coins-=p.cost; store.owned[p.id]=true; store.coinsSpent=(store.coinsSpent||0)+p.cost; saveStore(store); if(store.coinsSpent>=10000) awardTrophy("bigspender"); renderShop(); refreshCoinUI(); }
     });
     grid.querySelectorAll('[data-equip]').forEach(b=>b.onclick=()=>{
       if(store.equip.length<MAX_EQUIP && !store.equip.includes(b.dataset.equip)){ store.equip.push(b.dataset.equip); saveStore(store); renderShop(); refreshCoinUI(); }
@@ -1269,7 +1301,7 @@
     }).join('');
     grid.querySelectorAll('[data-buyskin]').forEach(b=>b.onclick=()=>{
       const s=SKINS.find(x=>x.id===b.dataset.buyskin);
-      if(store.coins>=s.cost){ store.coins-=s.cost; store.skins[s.id]=true; saveStore(store); renderSkins(); refreshCoinUI(); }
+      if(store.coins>=s.cost){ store.coins-=s.cost; store.skins[s.id]=true; store.coinsSpent=(store.coinsSpent||0)+s.cost; saveStore(store); if(store.coinsSpent>=10000) awardTrophy("bigspender"); renderSkins(); refreshCoinUI(); }
     });
     grid.querySelectorAll('[data-equipskin]').forEach(b=>b.onclick=()=>{
       store.skin=b.dataset.equipskin; saveStore(store); renderSkins(); refreshCoinUI();
@@ -1310,7 +1342,10 @@
     }).join('');
     grid.querySelectorAll('[data-buycheat]').forEach(b=>b.onclick=()=>{
       const c=CHEATS.find(x=>x.id===b.dataset.buycheat);
-      if(store.coins>=c.cost){ store.coins-=c.cost; store.cheats[c.id]=(store.cheats[c.id]||0)+1; saveStore(store); renderCheats(); refreshCoinUI(); renderCheatBar(); }
+      if(store.coins>=c.cost){ store.coins-=c.cost; store.cheats[c.id]=(store.cheats[c.id]||0)+1;
+        store.coinsSpent=(store.coinsSpent||0)+c.cost; saveStore(store);
+        if(store.coinsSpent>=10000) awardTrophy('bigspender');
+        renderCheats(); refreshCoinUI(); renderCheatBar(); }
     });
     refreshCoinUI();
   }
@@ -1334,6 +1369,11 @@
     if(!connected || isDead) return;
     if((store.cheats[id]||0)<=0) return;
     Sound.cheat();
+    // count toward Cheat Lord
+    store.cheatsUsed=(store.cheatsUsed||0)+1;
+    if(store.cheatsUsed>=10) awardTrophy('cheatlord');
+    // Mach Speed sets a window for the Speed Demon achievement
+    if(id==='mach') machUntil=performance.now()+20000;
     // client-side effects
     if(id==='grand'){ store.cheats[id]--; addCoins(1000); flashCoins('+1000 grand'); saveStore(store); renderCheatBar(); return; }
     if(id==='surge'){ cheatSurge=true; coinMult=coinMult*3; }
