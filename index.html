@@ -566,6 +566,9 @@
   store.owned = store.owned || {};                  // power-up ids owned
   store.skins = store.skins || {default:true};      // owned skins
   store.equip = store.equip || [];                  // equipped power-ups for next match
+  // Drop any stale ids from older versions (renamed/removed power-ups) and
+  // clamp to the slot limit, so leftover junk can't wedge the slots as "full".
+  store.equip = store.equip.filter(id => SHOP.some(s => s.id === id)).slice(0, MAX_EQUIP);
   store.skin  = store.skin  || 'default';           // equipped skin
   store.cheats = store.cheats || {};                // cheat id -> count owned (consumable)
   store.trophies = store.trophies || {};            // trophy id -> unlock timestamp
@@ -688,7 +691,8 @@
 
   function applyState(m){
     GW=m.w; GH=m.h;
-    owner = rleDecode(m.owner, GW*GH);
+    if (m.owner) owner = rleDecode(m.owner, GW*GH);   // null = unchanged, keep last
+    else if (!owner) owner = new Uint8Array(GW*GH);
     trail = rleDecode(m.trail, GW*GH);
     const seen = new Set();
     for (const e of m.ents){
@@ -1265,6 +1269,8 @@
   [shopModal,skinsModal,howModal,cheatsModal,trophiesModal].forEach(m=>m.addEventListener('click',e=>{ if(e.target===m) closeModals(); }));
 
   function renderShop(){
+    // self-heal: keep only valid, unique equipped ids within the slot limit
+    store.equip = [...new Set(store.equip.filter(id => SHOP.some(s=>s.id===id)))].slice(0, MAX_EQUIP);
     // visible slot indicator: 3 slots, filled or empty
     const slotBar=document.getElementById('slotBar');
     if(slotBar){

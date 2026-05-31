@@ -239,13 +239,28 @@ function findSpawn(selfId, blob) {
     const [cx, cy] = candidates[(Math.random() * candidates.length) | 0];
     return { cx, cy };
   }
-  // Last resort (map essentially full): random-ish patch, cleared.
-  const cx = B + 1 + ((Math.random() * (GRID_W - 2 * B - 2)) | 0);
-  const cy = B + 1 + ((Math.random() * (GRID_H - 2 * B - 2)) | 0);
-  for (let y = cy - B; y <= cy + B; y++)
-    for (let x = cx - B; x <= cx + B; x++)
-      if (inBounds(x, y)) owner[idx(x, y)] = 0;
-  return { cx, cy };
+  // Last resort: the blob couldn't be placed cleanly anywhere. Find the open
+  // (non-wall) cell closest to the map center and carve a small neutral pocket
+  // there. This guarantees we NEVER spawn inside a wall/void.
+  let best = null, bestD = Infinity;
+  const ccx = GRID_W / 2, ccy = GRID_H / 2;
+  for (let y = B + 1; y < GRID_H - B - 1; y++) {
+    for (let x = B + 1; x < GRID_W - B - 1; x++) {
+      if (!inBounds(x, y)) continue;                 // skip wall/void cells
+      const d = (x - ccx) * (x - ccx) + (y - ccy) * (y - ccy);
+      if (d < bestD) { bestD = d; best = [x, y]; }
+    }
+  }
+  if (best) {
+    const [cx, cy] = best;
+    // clear a neutral pocket, but only in playable cells (don't touch walls)
+    for (let y = cy - B; y <= cy + B; y++)
+      for (let x = cx - B; x <= cx + B; x++)
+        if (inBounds(x, y)) owner[idx(x, y)] = 0;
+    return { cx, cy };
+  }
+  // Absolute fallback (no open cell at all — shouldn't happen): map center.
+  return { cx: Math.floor(ccx), cy: Math.floor(ccy) };
 }
 
 function headingTowardCenter(cx, cy) {
@@ -1015,10 +1030,16 @@ function respawnEntity(e) {
   if (e.ws && e.ws.readyState === 1) send(e.ws, { t: 'respawn', id: e.id });
 }
 
-// Top-level tick: run every active room's simulation in isolation.
+// Top-level tick: run every active room's simulation in isolation. Rooms with
+// no connected humans are skipped entirely (no sim, no broadcast) to save CPU
+// and bandwidth — they resume the instant a player joins.
 function tick() {
   for (const mode of Object.keys(rooms)) {
-    useRoom(rooms[mode]);
+    const room = rooms[mode];
+    let hasHuman = false;
+    for (const e of room.entities.values()) { if (!e.isBot && e.ws && e.ws.readyState === 1) { hasHuman = true; break; } }
+    if (!hasHuman) continue;
+    useRoom(room);
     tickRoom();
   }
 }
@@ -1069,7 +1090,10 @@ function tickRoom() {
   }
 
   maintainBots();
-  broadcastState();
+  // BANDWIDTH SAVER 3: broadcast at half the simulation rate (~10/s). The client
+  // interpolates between snapshots, so movement still looks smooth.
+  activeRoom._bcCount = (activeRoom._bcCount || 0) + 1;
+  if (activeRoom._bcCount % 2 === 0) broadcastState();
 }
 
 // ---- NETWORKING ------------------------------------------------------------
@@ -1088,13 +1112,18 @@ function rleEncode(arr) {
 }
 
 function broadcastState() {
+  // BANDWIDTH SAVER 1: if no humans are connected to this room, don't broadcast
+  // anything (and the caller skips most simulation too). Bots idle cheaply.
+  let humans = 0;
+  for (const e of entities.values()) if (!e.isBot && e.ws && e.ws.readyState === 1) humans++;
+  if (humans === 0) return;
+
   const ents = [];
   for (const e of entities.values()) {
-    // Skip dead entities entirely so no stale/ghost avatar lingers on clients.
     if (e.dead) continue;
     ents.push({
       id: e.id, n: e.name, c: e.color, b: e.isBot ? 1 : 0,
-      x: +e.px.toFixed(2), y: +e.py.toFixed(2), h: e.heading,
+      x: +e.px.toFixed(1), y: +e.py.toFixed(1), h: e.heading,
       o: e.isOutside ? 1 : 0, a: e.area, d: 0,
       k: e.killerId || 0,
       sz: (e.cheatSizeUntil && Date.now() < e.cheatSizeUntil ? (e.cheatSize||3) : (e.sizeMult || 1)),
@@ -1121,10 +1150,19 @@ function broadcastState() {
     br = { inset: activeRoom.brStormInset, phase, secs: Math.max(0, secsToNext), alive: aliveCount, total: BR_START_BOTS + 1 };
   }
 
+  // BANDWIDTH SAVER 2: the owner (territory) grid changes only on captures, so
+  // only send it when it actually changed since this room's last broadcast.
+  // The trail grid is small (RLE of mostly-zeros) and changes constantly, so we
+  // still send it each broadcast.
+  const ownerRle = rleEncode(owner);
+  const ownerStr = ownerRle.join(',');
+  const ownerChanged = (activeRoom._lastOwnerStr !== ownerStr);
+  if (ownerChanged) activeRoom._lastOwnerStr = ownerStr;
+
   const msg = JSON.stringify({
     t: 'state',
     w: GRID_W, h: GRID_H,
-    owner: rleEncode(owner),
+    owner: ownerChanged ? ownerRle : null,   // null = "unchanged, reuse last"
     trail: rleEncode(trail),
     ents,
     br,
