@@ -691,8 +691,7 @@
 
   function applyState(m){
     GW=m.w; GH=m.h;
-    if (m.owner) owner = rleDecode(m.owner, GW*GH);   // null = unchanged, keep last
-    else if (!owner) owner = new Uint8Array(GW*GH);
+    if (m.owner) owner = rleDecode(m.owner, GW*GH);   // always sent now; guard is just safety
     trail = rleDecode(m.trail, GW*GH);
     const seen = new Set();
     for (const e of m.ents){

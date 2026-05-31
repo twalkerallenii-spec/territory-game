@@ -384,9 +384,13 @@ function spawnEntity({ isBot, name, loadout, mode }) {
     shieldUntil: shieldMs ? Date.now() + shieldMs : 0,
     // bot personality. BR bots are tougher: more aggressive hunters AND more
     // cautious (they retreat sooner, so they expose themselves less and die less).
-    botAggro: isBot ? (mode === 'br' ? 0.55 + Math.random() * 0.45 : 0.3 + Math.random() * 0.6) : 0,
-    botGreed: isBot ? (mode === 'br' ? 8 + Math.random() * 14 : 12 + Math.random() * 28) : 0,
-    botSkill: isBot ? (mode === 'br' ? 0.9 : 0.6) : 0,   // how reliably they dodge danger
+    // BR bots are tuned to be tough-but-fun: near-perfect danger avoidance and
+    // very cautious (they bank territory with short trails so they rarely get
+    // cut), while still expanding and fighting. Classic bots stay moderate.
+    botAggro: isBot ? (mode === 'br' ? 0.6 + Math.random() * 0.4 : 0.3 + Math.random() * 0.6) : 0,
+    botGreed: isBot ? (mode === 'br' ? 5 + Math.random() * 8 : 12 + Math.random() * 28) : 0,
+    botSkill: isBot ? (mode === 'br' ? 1.0 : 0.6) : 0,   // BR bots always dodge danger
+    botLook: isBot ? (mode === 'br' ? 4 : 2) : 0,        // danger lookahead distance
     botTarget: null,
     ws: null,
   };
@@ -971,11 +975,23 @@ function botThink(e) {
     if (t) e.pendingTurn = t;
     return;
   }
-  // SURVIVE (lookahead) — skilled bots also dodge danger 2 cells ahead, so they
-  // don't trap themselves. BR bots have high botSkill, making them much harder.
+  // SURVIVE (lookahead) — skilled bots scan several cells ahead so they don't
+  // trap themselves. BR bots look ~4 cells out and always react, making them
+  // very hard to corner.
   if (e.botSkill && Math.random() < e.botSkill) {
-    const ax2 = e.cx + dx * 2, ay2 = e.cy + dy * 2;
-    if (!cellSafeForBot(e, ax2, ay2)) {
+    const depth = e.botLook || 2;
+    for (let s = 2; s <= depth; s++) {
+      if (!cellSafeForBot(e, e.cx + dx * s, e.cy + dy * s)) {
+        const t = safeTurn();
+        if (t) { e.pendingTurn = t; return; }
+        break;
+      }
+    }
+  }
+  // FLEE — if a rival trail is very close, turn away from it early (defensive).
+  if (e.botSkill >= 1) {
+    const threat = nearestEnemyTrailDir(e, 4);
+    if (threat && threat === e.heading) {       // heading straight at danger
       const t = safeTurn();
       if (t) { e.pendingTurn = t; return; }
     }
@@ -1150,19 +1166,14 @@ function broadcastState() {
     br = { inset: activeRoom.brStormInset, phase, secs: Math.max(0, secsToNext), alive: aliveCount, total: BR_START_BOTS + 1 };
   }
 
-  // BANDWIDTH SAVER 2: the owner (territory) grid changes only on captures, so
-  // only send it when it actually changed since this room's last broadcast.
-  // The trail grid is small (RLE of mostly-zeros) and changes constantly, so we
-  // still send it each broadcast.
-  const ownerRle = rleEncode(owner);
-  const ownerStr = ownerRle.join(',');
-  const ownerChanged = (activeRoom._lastOwnerStr !== ownerStr);
-  if (ownerChanged) activeRoom._lastOwnerStr = ownerStr;
-
+  // NOTE: we always send the full owner grid. (An earlier "send only when
+  // changed" optimization caused late-joiners to start with an empty grid and
+  // desync into a corrupted display, so it was removed. The big bandwidth wins
+  // are skipping empty rooms and the half-rate broadcast, which are safe.)
   const msg = JSON.stringify({
     t: 'state',
     w: GRID_W, h: GRID_H,
-    owner: ownerChanged ? ownerRle : null,   // null = "unchanged, reuse last"
+    owner: rleEncode(owner),
     trail: rleEncode(trail),
     ents,
     br,
