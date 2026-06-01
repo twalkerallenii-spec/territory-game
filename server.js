@@ -729,7 +729,7 @@ function roundReset(winner) {
 // The client has already verified the player owns/paid for the cheat (coins are
 // client-side for now). The server applies the actual world effect so it's real
 // in multiplayer. Validated against this whitelist.
-const CHEAT_IDS = ['god','mach','thief','quake','titan','empire','freeze','phantom','surge','grand'];
+const CHEAT_IDS = ['god','mach','thief','quake','titan','empire','freeze','phantom','grand'];
 
 function largestOtherEntity(selfId) {
   let best = null;
@@ -805,9 +805,6 @@ function applyCheat(e, id) {
     case 'phantom': {                   // your trail invisible to others 12s
       e.phantomUntil = now + 12000;
       return true;
-    }
-    case 'surge': {                     // 3x coins rest of match (client multiplies)
-      return true;                      // effect is applied client-side on rewards
     }
     case 'grand': {                     // "grand" payout cheat — handled client-side
       return true;
