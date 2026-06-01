@@ -341,11 +341,9 @@ const POWERUPS = {
   big:    { sizeMult: 1.7 },      // bigger character
   zoom:   { zoomOut: true },      // client renders a wider view
   head:   { startBlob: 5 },       // bigger starting territory
-  magnet: { coinMult: 1.5 },      // client-side coin bonus
   shield: { shieldMs: 4000 },     // spawn protection (server-enforced)
-  phase:  { phaseTrail: true },   // your trail is slightly shorter-lived (cosmetic-ish)
-  rich:   { startCoins: true },   // client grants bonus coins on join
-  swift:  { turnPrio: true },     // queue turns a touch earlier (handled client/animation)
+  phase:  { phaseTrail: true },   // fainter trail (cosmetic-ish)
+  swift:  { turnPrio: true },     // queue turns a touch earlier
   guard:  { shieldMs: 2500 },     // shorter shield variant
 };
 
@@ -1106,10 +1104,10 @@ function tickRoom() {
   }
 
   maintainBots();
-  // BANDWIDTH SAVER 3: broadcast at half the simulation rate (~10/s). The client
-  // interpolates between snapshots, so movement still looks smooth.
-  activeRoom._bcCount = (activeRoom._bcCount || 0) + 1;
-  if (activeRoom._bcCount % 2 === 0) broadcastState();
+  // Broadcast every tick (full rate). A half-rate broadcast saved bandwidth but
+  // made trails look stale and cutting feel unresponsive, so it was reverted.
+  // The big safe saving (skipping rooms with no players) remains in tick().
+  broadcastState();
 }
 
 // ---- NETWORKING ------------------------------------------------------------

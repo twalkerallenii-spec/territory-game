@@ -593,6 +593,7 @@
   let ents = new Map();                // id -> {x,y,h,color,name,area,outside,bot,dead}
   // smoothed render state per entity (interpolation toward server pos)
   let view = new Map();                // id -> {x,y}
+  const colorCache = {};               // id -> color, remembered so territory never renders gray
 
   // camera (smoothed)
   let camX = GW / 2, camY = GH / 2;
@@ -693,6 +694,7 @@
     const seen = new Set();
     for (const e of m.ents){
       seen.add(e.id);
+      colorCache[e.id]=e.c;   // remember colors so territory never goes gray
       ents.set(e.id, {x:e.x,y:e.y,h:e.h,color:e.c,name:e.n,area:e.a,outside:e.o,bot:e.b,dead:e.d,
                       sz:e.sz||1,sk:e.sk||'default',bo:e.bo||0,sh:e.sh||0});
       if (!view.has(e.id)) view.set(e.id, {x:e.x,y:e.y});
@@ -772,14 +774,35 @@
     const d = KEYMAP[e.code];
     if (d && connected && ws && ws.readyState===1){ ws.send(JSON.stringify({t:'turn', d})); e.preventDefault(); }
   });
-  // touch swipe -> discrete turn (or tap-to-respawn while dead in classic)
-  let tsx=0,tsy=0;
-  addEventListener('touchstart',e=>{const t=e.changedTouches[0];tsx=t.clientX;tsy=t.clientY;},{passive:true});
-  addEventListener('touchend',e=>{const t=e.changedTouches[0];const dx=t.clientX-tsx,dy=t.clientY-tsy;
-    if(isDead){ if(activeMode!=='br' && connected&&ws&&ws.readyState===1) ws.send(JSON.stringify({t:'respawn'})); return; }
-    if(Math.abs(dx)<18&&Math.abs(dy)<18)return; let d;
-    if(Math.abs(dx)>Math.abs(dy)) d=dx>0?'E':'W'; else d=dy>0?'S':'N';
-    if(connected&&ws&&ws.readyState===1) ws.send(JSON.stringify({t:'turn',d}));},{passive:true});
+  // ---- PHONE TOUCH CONTROLS ----
+  // Swipe in a direction to turn (fires mid-drag so it feels responsive, no need
+  // to lift your finger). A quick tap (no movement) respawns when dead.
+  let tsx=0, tsy=0, tMoved=false, lastSwipeT=0;
+  const SWIPE_MIN=22;          // px of movement before a swipe registers
+  function sendTurn(d){ if(connected&&ws&&ws.readyState===1) ws.send(JSON.stringify({t:'turn',d})); }
+  addEventListener('touchstart',e=>{
+    const t=e.changedTouches[0]; tsx=t.clientX; tsy=t.clientY; tMoved=false;
+  },{passive:true});
+  addEventListener('touchmove',e=>{
+    const t=e.changedTouches[0];
+    const dx=t.clientX-tsx, dy=t.clientY-tsy;
+    if(Math.abs(dx)<SWIPE_MIN && Math.abs(dy)<SWIPE_MIN) return;
+    tMoved=true;
+    // throttle so one long drag doesn't spam turns
+    const now=performance.now(); if(now-lastSwipeT<90) return; lastSwipeT=now;
+    if(!isDead){
+      const d = Math.abs(dx)>Math.abs(dy) ? (dx>0?'E':'W') : (dy>0?'S':'N');
+      sendTurn(d);
+    }
+    // reset origin so the next swipe is measured fresh from here
+    tsx=t.clientX; tsy=t.clientY;
+  },{passive:true});
+  addEventListener('touchend',e=>{
+    // a tap (no real movement) respawns when dead (Classic)
+    if(!tMoved && isDead && activeMode!=='br' && connected&&ws&&ws.readyState===1){
+      ws.send(JSON.stringify({t:'respawn'}));
+    }
+  },{passive:true});
 
   // ---- DEATH / RESPAWN ----
   function onDeath(reason, killerId, eliminated, placement){
@@ -952,7 +975,11 @@
     const x0=Math.max(0,Math.floor((-ox)/cs)-1), x1=Math.min(GW-1,Math.ceil((W-ox)/cs)+1);
     const y0=Math.max(0,Math.floor((-oy)/cs)-1), y1=Math.min(GH-1,Math.ceil((H-oy)/cs)+1);
 
-    const colorOf=(id)=>{const e=ents.get(id);return e?e.color:'#bbb';};
+    const colorOf=(id)=>{
+      const e=ents.get(id);
+      if(e){ colorCache[id]=e.color; return e.color; }
+      return colorCache[id] || '#9aa'; // remembered color, or neutral-ish fallback
+    };
     const ownerAt=(x,y)=> (x<0||y<0||x>=GW||y>=GH) ? -1 : owner[y*GW+x];
 
     // --- paper backdrop (off-white with a faint grid like graph paper) ---
