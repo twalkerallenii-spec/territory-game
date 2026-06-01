@@ -35,6 +35,11 @@
     box-shadow:0 6px 22px rgba(120,110,90,.12);transition:transform .08s ease,color .15s ease;padding:0;}
   #homeBtn:hover{color:var(--accent);transform:translateY(-1px);}
   #homeBtn:active{transform:translateY(0);}
+  #muteBtn{position:absolute;top:14px;right:62px;width:40px;height:40px;border-radius:12px;
+    border:1px solid var(--line);background:rgba(255,255,255,.86);cursor:pointer;font-size:18px;
+    display:flex;align-items:center;justify-content:center;pointer-events:auto;
+    box-shadow:0 6px 22px rgba(120,110,90,.12);transition:transform .08s ease;padding:0;}
+  #muteBtn:hover{transform:translateY(-1px);}
 
   #mystat{position:absolute;left:14px;top:14px;padding:12px 16px;}
   #mystat .big{font-size:30px;font-weight:700;letter-spacing:.02em;line-height:1;}
@@ -56,6 +61,8 @@
     animation:drop .6s cubic-bezier(.2,1.3,.4,1) backwards;animation-delay:calc(var(--d) * 0.07s);}
   .logo3d .io{font-size:30px;align-self:flex-end;color:#ffd23f;margin-left:4px;
     text-shadow:0 3px 0 #c79a18, 0 5px 8px rgba(0,0,0,.4);transform:translateY(-6px);}
+  .logo3d .L[data-letter]{cursor:pointer;}
+  .logo3d .L.lit{color:#ffd23f;text-shadow:0 3px 0 #c79a18,0 5px 0 #a8810f,0 7px 12px rgba(0,0,0,.5);}
   @keyframes drop{from{opacity:0;transform:translateY(-26px) rotate(-8deg);}to{opacity:1;transform:translateY(0) rotate(0);}}
   .sub{color:#c3d2cc;font-size:13px;margin:8px 0 20px;line-height:1.6;}
   .modepick{display:flex;gap:10px;margin-bottom:14px;}
@@ -82,11 +89,11 @@
   .coinbar{position:absolute;top:18px;right:20px;background:rgba(255,255,255,.9);border:1px solid var(--line);
     border-radius:999px;padding:8px 16px;font-weight:700;color:#7a5b15;z-index:2;box-shadow:0 6px 18px rgba(120,110,90,.15);}
   .coinIcon{color:#f5b301;}
-  .menurow{display:flex;gap:10px;margin-top:12px;}
-  button.ghost{flex:1;background:rgba(255,255,255,.7);color:#5a5346;border:1px solid var(--line);
-    box-shadow:none;font-weight:700;}
-  button.ghost:hover{filter:none;background:#fff;color:var(--accent);}
-  #loadoutHint{color:var(--accent);min-height:14px;}
+  .menurow{display:flex;flex-wrap:wrap;gap:10px;margin-top:12px;}
+  button.ghost{flex:1 1 42%;min-width:0;background:rgba(255,255,255,.1);color:#dfeae6;
+    border:1px solid rgba(255,255,255,.14);box-shadow:none;font-weight:700;}
+  button.ghost:hover{filter:none;background:rgba(255,255,255,.18);color:#ffd23f;}
+  #loadoutHint{color:#ffd23f;min-height:14px;}
 
   /* modals */
   .modal{position:fixed;inset:0;z-index:20;display:flex;align-items:center;justify-content:center;
@@ -150,6 +157,17 @@
   @keyframes boostPulse{0%,100%{filter:brightness(1)}50%{filter:brightness(1.35)}}
   #boostLabel{font-size:11px;color:#5a5346;margin-top:5px;text-align:center;font-weight:700;letter-spacing:.03em;}
 
+  /* in-game cheat bar */
+  #cheatBar{position:absolute;left:50%;bottom:48px;transform:translateX(-50%);z-index:6;
+    display:flex;gap:8px;pointer-events:auto;}
+  #cheatBar .cb{width:46px;height:46px;border-radius:12px;border:1px solid var(--line);
+    background:rgba(255,255,255,.92);font-size:22px;cursor:pointer;position:relative;padding:0;
+    box-shadow:0 6px 16px rgba(120,110,90,.2);transition:transform .08s ease;}
+  #cheatBar .cb:hover{transform:translateY(-2px);}
+  #cheatBar .cb .ct{position:absolute;top:-6px;right:-6px;background:var(--accent);color:#fff;
+    font-size:10px;font-weight:800;border-radius:999px;min-width:16px;height:16px;line-height:16px;padding:0 3px;}
+  #cheatBar .cb .key{position:absolute;bottom:-2px;left:0;right:0;font-size:8px;color:#9a8f7a;font-weight:700;}
+
   /* battle-royale results */
   #brResult{position:fixed;inset:0;z-index:14;display:flex;align-items:center;justify-content:center;
     background:radial-gradient(120% 120% at 50% 30%, rgba(36,61,56,.85), rgba(20,32,28,.95));}
@@ -162,6 +180,57 @@
 
   #status{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);
     font-size:12px;color:var(--muted);letter-spacing:.05em;pointer-events:none;}
+
+  /* name input reject flash */
+  input.reject{border-color:#ff5a5a !important;animation:rejectShake .4s;}
+  @keyframes rejectShake{0%,100%{transform:translateX(0)}25%{transform:translateX(-6px)}75%{transform:translateX(6px)}}
+
+  /* map intro: "Starting match" -> name -> top-view */
+  #mapIntro{position:fixed;top:64px;left:50%;transform:translateX(-50%);z-index:16;
+    display:flex;align-items:center;justify-content:center;
+    opacity:0;transition:opacity .3s ease;pointer-events:none;}
+  #mapIntro.show{opacity:1;}
+  .mi-inner{display:flex;align-items:center;gap:12px;color:#eef3f0;
+    background:rgba(20,32,28,.9);border:1px solid rgba(255,255,255,.12);
+    border-radius:14px;padding:10px 16px;box-shadow:0 10px 30px rgba(0,0,0,.35);}
+  #mapIntro.show .mi-inner{transform:none;}
+  #miStarting{font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:#ffd23f;font-weight:700;}
+  #miCanvas{width:46px;height:46px;border-radius:8px;background:#243d38;}
+  #miName{font-size:18px;font-weight:800;letter-spacing:-.01em;}
+
+  /* round-end results */
+  #roundEnd{position:fixed;inset:0;z-index:15;display:flex;align-items:center;justify-content:center;
+    background:radial-gradient(120% 120% at 50% 35%, rgba(36,61,56,.96), rgba(16,26,23,.99));
+    opacity:0;transition:opacity .35s ease;pointer-events:none;}
+  #roundEnd.show{opacity:1;}
+  .re-card{text-align:center;color:#eef3f0;width:min(380px,90vw);padding:30px 28px;}
+  .re-crown{font-size:48px;}
+  .re-title{font-size:13px;letter-spacing:.4em;text-transform:uppercase;color:#9fb0aa;margin-top:4px;}
+  .re-winner{font-size:32px;font-weight:900;color:#ffd23f;margin:4px 0 18px;text-shadow:0 3px 0 rgba(0,0,0,.3);}
+  .re-board{text-align:left;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);
+    border-radius:14px;padding:12px 14px;}
+  .re-board .rr{display:flex;align-items:center;gap:9px;padding:4px 0;font-size:14px;}
+  .re-board .rr .rk{width:18px;color:#9fb0aa;font-weight:800;text-align:right;}
+  .re-board .rr .dt{width:12px;height:12px;border-radius:3px;}
+  .re-board .rr .nm{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .re-board .rr .pc{color:#c3d2cc;font-variant-numeric:tabular-nums;}
+  .re-board .rr.me .nm{color:#ffd23f;font-weight:800;}
+  .re-next{margin-top:16px;font-size:12px;color:#9fb0aa;letter-spacing:.1em;}
+  /* battle-royale storm HUD */
+  #stormHud{position:absolute;top:14px;left:50%;transform:translateX(-50%);z-index:6;
+    background:rgba(60,40,90,.86);color:#fff;border:1px solid rgba(180,150,230,.4);
+    border-radius:12px;padding:8px 16px;text-align:center;pointer-events:none;
+    box-shadow:0 6px 20px rgba(0,0,0,.3);}
+  #stormLabel{font-weight:800;font-size:14px;letter-spacing:.02em;}
+  #stormAlive{font-size:12px;color:#d9c9ff;margin-top:2px;}
+  /* power-up slot indicator */
+  #slotBar{margin:0 0 14px;}
+  .slots{display:flex;align-items:center;gap:8px;}
+  .slotlabel{font-size:12px;color:var(--muted);margin-right:4px;font-weight:700;}
+  .slot{width:40px;height:40px;border-radius:10px;display:flex;align-items:center;justify-content:center;
+    font-size:20px;border:2px dashed var(--line);}
+  .slot.empty{color:#c7bfae;}
+  .slot.filled{border-style:solid;border-color:var(--accent);background:rgba(255,90,122,.08);cursor:pointer;}
 </style>
 </head>
 <body>
@@ -175,6 +244,7 @@
   <button id="homeBtn" title="Back to menu" aria-label="Home">
     <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/></svg>
   </button>
+  <button id="muteBtn" title="Sound on/off" aria-label="Mute">🔊</button>
   <div id="board" class="card">
     <h2 id="boardTitle">Leaderboard</h2>
     <div id="boardRows"></div>
@@ -184,6 +254,11 @@
     <div id="boostLabel">⚡ SHIFT to boost</div>
   </div>
   <canvas id="minimap" class="card"></canvas>
+  <div id="stormHud" class="hidden">
+    <div id="stormLabel">⛈️ Storm</div>
+    <div id="stormAlive">👥 0 alive</div>
+  </div>
+  <div id="cheatBar" class="hidden"></div>
   <div id="status">connecting…</div>
 </div>
 
@@ -204,7 +279,7 @@
   <div class="joinwrap">
     <div class="inner">
       <div class="logo3d" aria-label="Paper">
-        <span class="L" style="--d:0">P</span><span class="L" style="--d:1">A</span><span class="L" style="--d:2">P</span><span class="L" style="--d:3">E</span><span class="L" style="--d:4">R</span><span class="L io" style="--d:5">io</span>
+        <span class="L" data-letter="P" style="--d:0">P</span><span class="L" data-letter="A" style="--d:1">A</span><span class="L" data-letter="P2" style="--d:2">P</span><span class="L" data-letter="E" style="--d:3">E</span><span class="L" data-letter="R" style="--d:4">R</span><span class="L io" style="--d:5">io</span>
       </div>
       <div class="sub">Leave home, draw a loop, return to fill it.<br>Cut a rival's trail and steal everything they own.</div>
       <input id="nameInput" maxlength="16" placeholder="enter your name" autocomplete="off" />
@@ -224,10 +299,34 @@
         <button class="ghost" id="howBtn">❓ How to Play</button>
         <button class="ghost" id="shopBtn">🛒 Shop</button>
         <button class="ghost" id="skinsBtn">🎨 Skins</button>
+        <button class="ghost" id="cheatsBtn">😈 Cheats</button>
+        <button class="ghost" id="trophiesBtn">🏆 Trophies</button>
       </div>
       <div class="hint">↑ ↓ ← → / WASD to steer · SHIFT to boost · SPACE to respawn</div>
       <div class="hint" id="loadoutHint"></div>
     </div>
+  </div>
+</div>
+
+<!-- TROPHIES modal -->
+<div id="trophiesModal" class="modal hidden">
+  <div class="modalcard">
+    <div class="modalhead"><span>🏆 Trophies</span>
+      <span class="coinpill" id="trophyCount">0 / 10</span>
+      <button class="x" data-close>✕</button></div>
+    <p class="modalsub">Earn these by playing. Locked ones show what to do.</p>
+    <div id="trophyGrid" class="grid"></div>
+  </div>
+</div>
+
+<!-- CHEATS modal -->
+<div id="cheatsModal" class="modal hidden">
+  <div class="modalcard">
+    <div class="modalhead"><span>😈 Cheats</span>
+      <span class="coinpill"><span class="coinIcon">●</span> <span id="cheatCoins">0</span></span>
+      <button class="x" data-close>✕</button></div>
+    <p class="modalsub">Powerful one-time abilities. Buy them here, then trigger them mid-game from the cheat bar (or number keys 1–0). Each use is consumed.</p>
+    <div id="cheatGrid" class="grid"></div>
   </div>
 </div>
 
@@ -260,6 +359,7 @@
       <span class="coinpill"><span class="coinIcon">●</span> <span id="shopCoins">0</span></span>
       <button class="x" data-close>✕</button></div>
     <p class="modalsub">Buy a power-up, then equip up to 3 for your next match. Effects last one life.</p>
+    <div id="slotBar"></div>
     <div id="shopGrid" class="grid"></div>
   </div>
 </div>
@@ -293,6 +393,26 @@
   </div>
 </div>
 
+<!-- ROUND END results -->
+<div id="roundEnd" class="hidden">
+  <div class="re-card">
+    <div class="re-crown">👑</div>
+    <div class="re-title">Round Over</div>
+    <div class="re-winner" id="reWinner">Winner</div>
+    <div class="re-board" id="reBoard"></div>
+    <div class="re-next" id="reNext">Next map starting…</div>
+  </div>
+</div>
+
+<!-- MAP INTRO overlay -->
+<div id="mapIntro" class="hidden">
+  <div class="mi-inner">
+    <div id="miStarting">Starting match</div>
+    <canvas id="miCanvas"></canvas>
+    <div id="miName">The Arena</div>
+  </div>
+</div>
+
 <!-- CHAT -->
 <button id="chatToggle" class="hidden" title="Chat">💬</button>
 <div id="chatPanel" class="hidden">
@@ -307,6 +427,40 @@
 (() => {
   'use strict';
   const cv = document.getElementById('game');
+
+  // ---- SOUND (synthesized via Web Audio — no files to host) ----------------
+  const Sound = (()=>{
+    let ac=null, enabled=true;
+    function ctx(){ if(!ac){ try{ ac=new (window.AudioContext||window.webkitAudioContext)(); }catch(_){ } } return ac; }
+    function unlock(){ const a=ctx(); if(a && a.state==='suspended') a.resume(); }
+    addEventListener('pointerdown', unlock);
+    addEventListener('keydown', unlock);
+    function tone({freq=440, type='sine', dur=0.12, vol=0.2, slideTo=null, delay=0}){
+      const a=ctx(); if(!a||!enabled) return;
+      const t0=a.currentTime+delay;
+      const osc=a.createOscillator(), g=a.createGain();
+      osc.type=type; osc.frequency.setValueAtTime(freq, t0);
+      if(slideTo) osc.frequency.exponentialRampToValueAtTime(slideTo, t0+dur);
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.exponentialRampToValueAtTime(vol, t0+0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0+dur);
+      osc.connect(g); g.connect(a.destination);
+      osc.start(t0); osc.stop(t0+dur+0.02);
+    }
+    return {
+      setEnabled(v){ enabled=v; },
+      isEnabled(){ return enabled; },
+      capture(){ tone({freq:520,type:'triangle',dur:0.10,vol:0.22,slideTo:780}); },
+      coin(){ tone({freq:880,type:'square',dur:0.06,vol:0.15}); tone({freq:1320,type:'square',dur:0.07,vol:0.13,delay:0.06}); },
+      kill(){ tone({freq:300,type:'sawtooth',dur:0.10,vol:0.2,slideTo:520}); },
+      death(){ tone({freq:380,type:'sawtooth',dur:0.30,vol:0.25,slideTo:90}); },
+      boost(){ tone({freq:240,type:'sine',dur:0.25,vol:0.2,slideTo:700}); },
+      cheat(){ tone({freq:200,type:'sawtooth',dur:0.18,vol:0.2,slideTo:900}); tone({freq:600,type:'square',dur:0.18,vol:0.15,delay:0.1}); },
+      win(){ [523,659,784,1047].forEach((f,i)=>tone({freq:f,type:'triangle',dur:0.18,vol:0.22,delay:i*0.12})); },
+      start(){ tone({freq:440,type:'triangle',dur:0.12,vol:0.18}); tone({freq:660,type:'triangle',dur:0.14,vol:0.18,delay:0.12}); },
+      reject(){ tone({freq:200,type:'square',dur:0.2,vol:0.2,slideTo:120}); },
+    };
+  })();
   const ctx = cv.getContext('2d');
   let CELL_SCREEN = 14;                // px per cell (changes with zoom-out power-up)
   const BASE_CELL = 14;
@@ -331,10 +485,8 @@
     {id:'big',   ic:'🟦', nm:'Big Mode',     ds:'Start noticeably bigger.',     cost:150},
     {id:'zoom',  ic:'🔭', nm:'Wide View',    ds:'See more of the map.',         cost:120},
     {id:'head',  ic:'🏰', nm:'Head Start',   ds:'Bigger starting territory.',   cost:200},
-    {id:'magnet',ic:'🧲', nm:'Coin Magnet',  ds:'+50% coins this match.',       cost:250},
     {id:'shield',ic:'🛡️', nm:'Spawn Shield', ds:'4s of protection at spawn.',   cost:200},
     {id:'guard', ic:'⛨', nm:'Mini Shield',  ds:'2.5s spawn protection.',       cost:120},
-    {id:'rich',  ic:'💰', nm:'Rich Start',   ds:'+100 coins when you join.',    cost:180},
     {id:'phase', ic:'👻', nm:'Ghost Trail',  ds:'Fainter, sneakier trail.',     cost:160},
     {id:'swift', ic:'💨', nm:'Swift Turns',  ds:'Snappier turn feel.',          cost:130},
   ];
@@ -358,6 +510,50 @@
   ];
   const MAX_EQUIP = 3;
 
+  // ---- TROPHIES / ACHIEVEMENTS (browser-saved, unlock once) ----------------
+  const TROPHIES = [
+    {id:'first_blood', ic:'🩸', nm:'First Blood',   ds:'Get your first kill.'},
+    {id:'hat_trick',   ic:'🎩', nm:'Hat Trick',     ds:'3 kills in one life.'},
+    {id:'spree',       ic:'🔥', nm:'Killing Spree', ds:'5 kills in one life.'},
+    {id:'victory',     ic:'👑', nm:'Victory Royale',ds:'Win a Battle Royale.'},
+    {id:'survivor',    ic:'🛡️', nm:'Survivor',      ds:'Finish top 3 in a Battle Royale.'},
+    {id:'baron',       ic:'🏰', nm:'Land Baron',    ds:'Control 50% of the map at once.'},
+    {id:'conqueror',   ic:'🌍', nm:'Conqueror',     ds:'Hit 100% and win a round.'},
+    {id:'storm',       ic:'⛈️', nm:'Storm Chaser',  ds:'Win a BR that reaches the final circle.'},
+    {id:'comeback',    ic:'💪', nm:'Comeback Kid',  ds:'Win after being under 5% territory.'},
+    {id:'centurion',   ic:'⚔️', nm:'Centurion',     ds:'100 total kills (lifetime).'},
+    {id:'double',      ic:'⚡', nm:'Double Kill',    ds:'Cut 2 players within 3 seconds.'},
+    {id:'untouchable', ic:'✨', nm:'Untouchable',    ds:'Win a BR without ever boosting.'},
+    {id:'speeddemon',  ic:'🚀', nm:'Speed Demon',    ds:'Get a kill while using Mach Speed.'},
+    {id:'bigspender',  ic:'💸', nm:'Big Spender',    ds:'Spend 10,000 coins total.'},
+    {id:'loaded',      ic:'🤑', nm:'Loaded',         ds:'Hold 50,000 coins at once.'},
+    {id:'cheatlord',   ic:'🃏', nm:'Cheat Lord',     ds:'Use 10 cheats total.'},
+    {id:'marathoner',  ic:'🏃', nm:'Marathoner',     ds:'Play 25 matches.'},
+    {id:'quarter',     ic:'📐', nm:'Quarter Master', ds:'Control 25% of the map at once.'},
+    {id:'bothunter',   ic:'🎯', nm:'Bot Hunter',     ds:'Get 50 kills total.'},
+    {id:'flawless',    ic:'💎', nm:'Flawless',       ds:'Win a round without being cut.'},
+  ];
+  function awardTrophy(id){
+    store.trophies = store.trophies || {};
+    if(store.trophies[id]) return;            // already unlocked
+    store.trophies[id]=Date.now(); saveStore(store);
+    const tr=TROPHIES.find(t=>t.id===id);
+    if(tr){ Sound.win(); flashBanner('🏆 Trophy unlocked: '+tr.ic+' '+tr.nm, '#ffd23f'); }
+  }
+
+  // ---- CHEATS (consumable; bought per use, applied in-game) -----------------
+  const CHEATS = [
+    {id:'god',     ic:'😇', nm:'Full God',      ds:'Swap your land with the #1 player. Take it all.', cost:10000},
+    {id:'mach',    ic:'🚀', nm:'Mach Speed',    ds:'3× speed for 20 seconds.',                        cost:8000},
+    {id:'thief',   ic:'🦹', nm:'Land Thief',    ds:'Steal 25% of the biggest player instantly.',      cost:7000},
+    {id:'quake',   ic:'🌋', nm:'Earthquake',    ds:'Everyone else loses their trail + 15% of land.',  cost:6000},
+    {id:'titan',   ic:'🗿', nm:'Titan',         ds:'3× size + 15s of being uncuttable.',              cost:5000},
+    {id:'empire',  ic:'🏯', nm:'Instant Empire',ds:'Spawn a giant block of territory around you.',     cost:4500},
+    {id:'freeze',  ic:'❄️', nm:'Freeze Ray',    ds:'Freezes EVERYONE else for 8 seconds.',            cost:3800},
+    {id:'phantom', ic:'🌫️', nm:'Phantom',       ds:'Your trail goes faint for 12 seconds.',           cost:3200},
+    {id:'grand',   ic:'🪙', nm:'Grand Payout',  ds:'Instantly gain 1,000 coins.',                     cost:2000},
+  ];
+
   function loadStore(){
     try{ return JSON.parse(localStorage.getItem('territory_save')||'{}'); }catch(_){ return {}; }
   }
@@ -367,23 +563,36 @@
   store.owned = store.owned || {};                  // power-up ids owned
   store.skins = store.skins || {default:true};      // owned skins
   store.equip = store.equip || [];                  // equipped power-ups for next match
+  // Drop any stale ids from older versions (renamed/removed power-ups) and
+  // clamp to the slot limit, so leftover junk can't wedge the slots as "full".
+  store.equip = store.equip.filter(id => SHOP.some(s => s.id === id)).slice(0, MAX_EQUIP);
   store.skin  = store.skin  || 'default';           // equipped skin
+  store.cheats = store.cheats || {};                // cheat id -> count owned (consumable)
+  store.trophies = store.trophies || {};            // trophy id -> unlock timestamp
+  store.lifetimeKills = store.lifetimeKills || 0;    // total kills across all games
+  store.coinsSpent = store.coinsSpent || 0;          // total coins spent (shop+cheats)
+  store.cheatsUsed = store.cheatsUsed || 0;          // total cheats activated
+  store.matchesPlayed = store.matchesPlayed || 0;    // total matches joined
   saveStore(store);
 
-  function addCoins(n){ store.coins += n; saveStore(store); refreshCoinUI(); }
+  function addCoins(n){ store.coins += n; saveStore(store); refreshCoinUI(); if(store.coins>=50000) awardTrophy('loaded'); }
   function refreshCoinUI(){
     document.getElementById('coinAmt').textContent = store.coins;
     const sc=document.getElementById('shopCoins'); if(sc) sc.textContent=store.coins;
     const kc=document.getElementById('skinCoins'); if(kc) kc.textContent=store.coins;
+    const cc=document.getElementById('cheatCoins'); if(cc) cc.textContent=store.coins;
     const lh=document.getElementById('loadoutHint');
     if(lh) lh.textContent = store.equip.length ? ('Equipped: '+store.equip.map(id=>(SHOP.find(s=>s.id===id)||{}).nm).join(', ')) : '';
   }
 
   // server state (latest snapshot)
   let owner = null, trail = null;      // Uint8Array, decoded from RLE
+  let blocked = null;                  // void cells for the current map shape
+  let mapOutline = null;               // smooth boundary {kind,...} for clean rendering
   let ents = new Map();                // id -> {x,y,h,color,name,area,outside,bot,dead}
   // smoothed render state per entity (interpolation toward server pos)
   let view = new Map();                // id -> {x,y}
+  const colorCache = {};               // id -> color, remembered so territory never renders gray
 
   // camera (smoothed)
   let camX = GW / 2, camY = GH / 2;
@@ -412,14 +621,14 @@
   }
 
   // ---- WS ----
-  let coinMult = 1;                     // raised by the magnet power-up this match
+  let coinMult = 1;                     // tripled by the Magnet Surge cheat mid-match
   function connect(name){
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     ws = new WebSocket(`${proto}://${location.host}`);
     // apply client-side power-up effects for this match
     zoomOut = store.equip.includes('zoom');
     CELL_SCREEN = zoomOut ? 9 : BASE_CELL;
-    coinMult = store.equip.includes('magnet') ? 1.5 : 1;
+    coinMult = 1;   // base; the Magnet Surge cheat can still triple it mid-match
     hasBoost = store.equip.includes('boost');
     boostState = 'idle'; boostStart = 0;
     activeMode = selectedMode;
@@ -429,43 +638,89 @@
     ws.onerror = () => { statusEl.textContent='connection error'; };
     ws.onmessage = (ev) => {
       const m = JSON.parse(ev.data);
+      if (m.t==='nameReject'){ Sound.reject(); onNameReject(m.message); return; }
       if (m.t==='welcome'){ myId=m.id; GW=m.w; GH=m.h; activeMode=m.mode||selectedMode;
         boostMs=m.boostMs||10000; cooldownMs=m.cooldownMs||10000;
+        blocked = m.blocked ? rleDecode(m.blocked, GW*GH) : null;
+        mapOutline = m.outline || null;
         hud.classList.remove('hidden'); joinScreen.classList.add('hidden'); closeModals(); statusEl.textContent='';
         document.getElementById('chatToggle').classList.remove('hidden');
         document.getElementById('boostWrap').classList.toggle('hidden', !hasBoost);
+        renderCheatBar();
         document.getElementById('boardTitle').textContent = activeMode==='br' ? 'Survivors' : 'Leaderboard';
         document.getElementById('myStatLab').textContent = activeMode==='br' ? 'territory · 1 life' : 'your territory';
-        // rich-start power-up grants bonus coins on join
-        if (store.equip.includes('rich')){ addCoins(100); flashCoins('+100 rich start'); }
+        lastMyArea = null; lowestPct = 100; Sound.start();
+        boostedThisLife=false; cutThisRound=false; machUntil=0; lastKillT=0;
+        store.matchesPlayed=(store.matchesPlayed||0)+1; saveStore(store);
+        if(store.matchesPlayed>=25) awardTrophy('marathoner');
+        playMapIntro(m.mapName||'The Arena', false);   // "Starting match" intro
       }
       else if (m.t==='full'){ statusEl.textContent='world is full — try again shortly'; }
       else if (m.t==='state'){ applyState(m); }
-      else if (m.t==='death'){ onDeath(m.reason, m.killerId, m.eliminated, m.placement); }
+      else if (m.t==='death'){ Sound.death(); onDeath(m.reason, m.killerId, m.eliminated, m.placement); }
       else if (m.t==='respawn'){ onRespawn(); }
-      else if (m.t==='cut'){ onCut(m.by); }
-      else if (m.t==='roundreset'){ onRoundReset(m.winner); }
-      else if (m.t==='kill'){ const c=Math.round((m.coins||20)*coinMult); addCoins(c); flashCoins('+'+c); }
-      else if (m.t==='fullmap'){ const c=Math.round((m.coins||1000)*coinMult); addCoins(c); flashCoins('+'+c+' 100%!'); }
+      else if (m.t==='booted'){ Sound.death(); onBooted(m.by); }
+      else if (m.t==='victory'){ onVictory(m.coins, m.placement); }
+      else if (m.t==='brover'){ onBrOver(m.winner); }
+      else if (m.t==='brnewmatch'){ onBrNewMatch(); }
+      else if (m.t==='storm'){ if(m.blocked) blocked=rleDecode(m.blocked, GW*GH); }
+      else if (m.t==='roundreset'){ if(m.blocked) blocked=rleDecode(m.blocked, GW*GH); if(m.outline) mapOutline=m.outline; onRoundReset(m.winner, m.mapName); }
+      else if (m.t==='kill'){ Sound.kill(); const base=(m.coins||20); const c=Math.round(base*coinMult); addCoins(c);
+        flashCoins('+'+c + (m.mult>1?(' · x'+m.mult+' streak!'):''));
+        store.lifetimeKills=(store.lifetimeKills||0)+1; saveStore(store);
+        awardTrophy('first_blood');
+        if((m.total||0)>=3) awardTrophy('hat_trick');
+        if((m.total||0)>=5) awardTrophy('spree');
+        if(store.lifetimeKills>=50) awardTrophy('bothunter');
+        if(store.lifetimeKills>=100) awardTrophy('centurion');
+        // Double Kill: two cuts within 3s
+        const now=performance.now();
+        if(lastKillT && now-lastKillT<=3000) awardTrophy('double');
+        lastKillT=now;
+        // Speed Demon: kill while Mach Speed cheat is active
+        if(now < machUntil) awardTrophy('speeddemon');
+        // Untouchable/Flawless tracking: a kill doesn't break these; being cut does
+      }
+      else if (m.t==='fullmap'){ Sound.win(); const c=Math.round((m.coins||1000)*coinMult); addCoins(c); flashCoins('+'+c+' 100%!'); awardTrophy('conqueror'); }
       else if (m.t==='chat'){ addChat(m.name, m.color, m.text); }
     };
   }
 
   function applyState(m){
     GW=m.w; GH=m.h;
-    owner = rleDecode(m.owner, GW*GH);
+    if (m.owner) owner = rleDecode(m.owner, GW*GH);   // always sent now; guard is just safety
     trail = rleDecode(m.trail, GW*GH);
     const seen = new Set();
     for (const e of m.ents){
       seen.add(e.id);
+      colorCache[e.id]=e.c;   // remember colors so territory never goes gray
       ents.set(e.id, {x:e.x,y:e.y,h:e.h,color:e.c,name:e.n,area:e.a,outside:e.o,bot:e.b,dead:e.d,
                       sz:e.sz||1,sk:e.sk||'default',bo:e.bo||0,sh:e.sh||0});
       if (!view.has(e.id)) view.set(e.id, {x:e.x,y:e.y});
     }
     for (const id of [...ents.keys()]) if(!seen.has(id)){ ents.delete(id); view.delete(id); }
+    brState = m.br || null;
     updateHud();
     updateBoostMeter();
+    updateStormHud();
     drawMinimap();
+  }
+  let brState = null;
+
+  // Fortnite-style storm HUD: countdown + alive count
+  function updateStormHud(){
+    const el=document.getElementById('stormHud');
+    if(!el) return;
+    if(!brState || activeMode!=='br'){ el.classList.add('hidden'); return; }
+    el.classList.remove('hidden');
+    const mins=Math.floor(brState.secs/60), secs=brState.secs%60;
+    const tstr=mins+':'+(secs<10?'0':'')+secs;
+    let label;
+    if(brState.phase==='grace') label='⛈️ Storm closes in '+tstr;
+    else if(brState.phase==='closing') label='⛈️ Storm closing · '+tstr;
+    else label='⛈️ Final circle';
+    document.getElementById('stormLabel').textContent=label;
+    document.getElementById('stormAlive').textContent='👥 '+brState.alive+' alive';
   }
 
   function updateHud(){
@@ -479,8 +734,23 @@
              `<span class="nm">${escapeHtml(e.name)}</span><span class="pct">${pct}%</span></div>`;
     }).join('');
     const me = ents.get(myId);
-    if (me) myAreaEl.textContent = (me.area/total*100).toFixed(2)+'%';
+    if (me){
+      myAreaEl.textContent = (me.area/total*100).toFixed(2)+'%';
+      if (lastMyArea!==null && me.area > lastMyArea + 3) Sound.capture();
+      lastMyArea = me.area;
+      // trophy tracking
+      const pct = me.area/total*100;
+      if (pct >= 25) awardTrophy('quarter');
+      if (pct >= 50) awardTrophy('baron');
+      if (pct > 0 && pct < lowestPct) lowestPct = pct;   // track for comeback
+    }
   }
+  let lastMyArea = null;
+  let lowestPct = 100;   // lowest territory % this life (for Comeback Kid)
+  let lastKillT = 0;     // timestamp of last kill (for Double Kill)
+  let machUntil = 0;     // mach-speed active until (for Speed Demon)
+  let boostedThisLife = false;  // did I boost this life (for Untouchable)
+  let cutThisRound = false;     // was I cut this round (for Flawless)
   function escapeHtml(s){return (''+s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 
   // ---- INPUT (intent only) ----
@@ -496,25 +766,47 @@
     // Shift activates the rechargeable boost.
     if ((e.code==='ShiftLeft'||e.code==='ShiftRight') && hasBoost && !isDead && boostState==='idle'
         && connected && ws && ws.readyState===1){
-      ws.send(JSON.stringify({t:'boost'})); boostState='active'; boostStart=performance.now();
+      ws.send(JSON.stringify({t:'boost'})); boostState='active'; boostStart=performance.now(); Sound.boost(); boostedThisLife=true;
       e.preventDefault(); return;
     }
     if (isDead) return;                       // no steering while spectating
     const d = KEYMAP[e.code];
     if (d && connected && ws && ws.readyState===1){ ws.send(JSON.stringify({t:'turn', d})); e.preventDefault(); }
   });
-  // touch swipe -> discrete turn (or tap-to-respawn while dead in classic)
-  let tsx=0,tsy=0;
-  addEventListener('touchstart',e=>{const t=e.changedTouches[0];tsx=t.clientX;tsy=t.clientY;},{passive:true});
-  addEventListener('touchend',e=>{const t=e.changedTouches[0];const dx=t.clientX-tsx,dy=t.clientY-tsy;
-    if(isDead){ if(activeMode!=='br' && connected&&ws&&ws.readyState===1) ws.send(JSON.stringify({t:'respawn'})); return; }
-    if(Math.abs(dx)<18&&Math.abs(dy)<18)return; let d;
-    if(Math.abs(dx)>Math.abs(dy)) d=dx>0?'E':'W'; else d=dy>0?'S':'N';
-    if(connected&&ws&&ws.readyState===1) ws.send(JSON.stringify({t:'turn',d}));},{passive:true});
+  // ---- PHONE TOUCH CONTROLS ----
+  // Swipe in a direction to turn (fires mid-drag so it feels responsive, no need
+  // to lift your finger). A quick tap (no movement) respawns when dead.
+  let tsx=0, tsy=0, tMoved=false, lastSwipeT=0;
+  const SWIPE_MIN=22;          // px of movement before a swipe registers
+  function sendTurn(d){ if(connected&&ws&&ws.readyState===1) ws.send(JSON.stringify({t:'turn',d})); }
+  addEventListener('touchstart',e=>{
+    const t=e.changedTouches[0]; tsx=t.clientX; tsy=t.clientY; tMoved=false;
+  },{passive:true});
+  addEventListener('touchmove',e=>{
+    const t=e.changedTouches[0];
+    const dx=t.clientX-tsx, dy=t.clientY-tsy;
+    if(Math.abs(dx)<SWIPE_MIN && Math.abs(dy)<SWIPE_MIN) return;
+    tMoved=true;
+    // throttle so one long drag doesn't spam turns
+    const now=performance.now(); if(now-lastSwipeT<90) return; lastSwipeT=now;
+    if(!isDead){
+      const d = Math.abs(dx)>Math.abs(dy) ? (dx>0?'E':'W') : (dy>0?'S':'N');
+      sendTurn(d);
+    }
+    // reset origin so the next swipe is measured fresh from here
+    tsx=t.clientX; tsy=t.clientY;
+  },{passive:true});
+  addEventListener('touchend',e=>{
+    // a tap (no real movement) respawns when dead (Classic)
+    if(!tMoved && isDead && activeMode!=='br' && connected&&ws&&ws.readyState===1){
+      ws.send(JSON.stringify({t:'respawn'}));
+    }
+  },{passive:true});
 
   // ---- DEATH / RESPAWN ----
   function onDeath(reason, killerId, eliminated, placement){
     isDead = true;
+    if (reason==='cut' || killerId) cutThisRound = true;   // a rival cut me -> not flawless
     spectateId = (killerId && ents.has(killerId)) ? killerId : null;
     const killer = spectateId ? ents.get(spectateId) : null;
 
@@ -523,8 +815,10 @@
       const br = document.getElementById('brResult');
       document.getElementById('brPlace').textContent = '#'+(placement||'?');
       document.getElementById('brHead').textContent = (placement===1)?'Victory Royale!':'Eliminated';
-      document.getElementById('brSub').textContent = killer ? ('Cut down by '+killer.name+'.') : 'You were cut down.';
+      document.getElementById('brSub').textContent = (reason==='storm') ? 'Caught in the storm.' :
+        (killer ? ('Cut down by '+killer.name+'.') : 'You were cut down.');
       br.classList.remove('hidden');
+      if(placement && placement<=3) awardTrophy('survivor');
       return;
     }
     const labels={cut:'cut by a rival',self:'crossed your own trail'};
@@ -532,17 +826,75 @@
     spectateLabel.textContent = killer ? ('Spectating '+killer.name) : 'Spectating the board';
     deathScreen.classList.remove('hidden');
   }
-  function onRespawn(){ isDead=false; spectateId=null; deathScreen.classList.add('hidden'); }
+  function onRespawn(){ isDead=false; spectateId=null; deathScreen.classList.add('hidden'); lastMyArea=null; lowestPct=100; boostedThisLife=false; }
 
-  // Classic: got cut but kept playing with a fresh beginner plot — quick banner.
-  function onCut(by){
-    isDead=false; spectateId=null; deathScreen.classList.add('hidden');
-    flashBanner(by ? ('✂️ Cut by '+by+' — fresh start!') : '✂️ You were cut — fresh start!', '#ff7a7a');
+  // Battle Royale: you're the last one standing — Victory Royale.
+  function onVictory(coins, placement){
+    isDead=false; spectateId=null;
+    deathScreen.classList.add('hidden');
+    const c=Math.round((coins||2000)*coinMult); addCoins(c);
+    Sound.win();
+    const br=document.getElementById('brResult');
+    document.getElementById('brPlace').textContent='#1';
+    document.getElementById('brHead').textContent='Victory Royale! 👑';
+    document.getElementById('brSub').textContent='Last one standing. +'+c+' coins!';
+    br.classList.remove('hidden');
+    // trophies for winning
+    awardTrophy('victory');
+    awardTrophy('survivor');                       // winning is also top-3
+    if (brState && brState.phase==='closed') awardTrophy('storm');
+    if (lowestPct < 5) awardTrophy('comeback');
+    if (!boostedThisLife) awardTrophy('untouchable');
+    if (!cutThisRound) awardTrophy('flawless');
   }
-  // Someone hit 100% — the whole map reset.
-  function onRoundReset(winner){
+  // A fresh BR match is starting — clear the results and resume play.
+  function onBrNewMatch(){
+    isDead=false; spectateId=null;
+    document.getElementById('brResult').classList.add('hidden');
+    deathScreen.classList.add('hidden');
+    lastMyArea=null; lowestPct=100; boostedThisLife=false; cutThisRound=false; machUntil=0;
+    flashBanner('🪂 New Battle Royale — drop in!', '#ffd23f');
+  }
+  // Someone else won the BR (you were already out) — show who.
+  function onBrOver(winner){
+    flashBanner('👑 '+(winner||'Someone')+' won the Battle Royale', '#ffd23f');
+  }
+
+  // Sent to the main menu after being cut 3× by the same player (Classic).
+  function onBooted(by){
+    flashBanner('☠️ '+(by||'Someone')+' eliminated you 3 times — back to menu', '#ff7a7a');
+    setTimeout(goHome, 1200);
+  }
+  // Name rejected at join — show the message, let them retry.
+  function onNameReject(message){
+    connected=false; try{ws&&ws.close();}catch(_){ } ws=null;
+    const ni=document.getElementById('nameInput');
+    statusEl.textContent='';
+    ni.classList.add('reject');
+    flashBanner('⛔ '+(message||'Name not allowed. Try another.'), '#ff7a7a');
+    setTimeout(()=>ni.classList.remove('reject'), 1500);
+    ni.focus(); ni.select();
+  }
+  // Someone hit 100% — show round-end results, then the new map intro.
+  function onRoundReset(winner, mapName){
     isDead=false; spectateId=null; deathScreen.classList.add('hidden');
-    flashBanner('👑 '+(winner||'Someone')+' took the whole map! New round.', '#ffd23f');
+    Sound.win();
+    // snapshot the final standings from the current entities
+    const total=GW*GH;
+    const list=[...ents.entries()].map(([id,e])=>({id,...e})).sort((a,b)=>b.area-a.area).slice(0,8);
+    const board=document.getElementById('reBoard');
+    board.innerHTML = list.map((e,i)=>{
+      const pct=(e.area/total*100).toFixed(1);
+      const me=e.id===myId?' me':'';
+      return `<div class="rr${me}"><span class="rk">${i+1}</span><span class="dt" style="background:${e.color}"></span>`+
+             `<span class="nm">${escapeHtml(e.name)}</span><span class="pc">${pct}%</span></div>`;
+    }).join('');
+    document.getElementById('reWinner').textContent = winner||'Someone';
+    const re=document.getElementById('roundEnd');
+    re.classList.remove('hidden'); re.classList.add('show');
+    // after a few seconds, fade out and play the new map intro
+    setTimeout(()=>{ re.classList.remove('show'); }, 3400);
+    setTimeout(()=>{ re.classList.add('hidden'); playMapIntro(mapName||'New Map', true); }, 3900);
   }
   // generic center banner
   let bannerTimer=null;
@@ -555,6 +907,43 @@
       document.body.appendChild(el); }
     el.textContent=text; el.style.borderLeft='4px solid '+(color||'#ffd23f'); el.style.opacity='1';
     clearTimeout(bannerTimer); bannerTimer=setTimeout(()=>{el.style.opacity='0';},2200);
+  }
+
+  // ---- MAP INTRO: "Starting match" -> map name -> top-view flyover ----
+  function playMapIntro(mapName, isNewRound){
+    const ov=document.getElementById('mapIntro');
+    const t1=document.getElementById('miStarting');
+    const t2=document.getElementById('miName');
+    t1.textContent = isNewRound ? 'New Round' : 'Starting match';
+    t2.textContent = mapName;
+    ov.classList.remove('hidden');
+    ov.classList.add('show');
+    // draw a top-view of the whole map onto the intro canvas
+    drawMapPreview();
+    setTimeout(()=>{ ov.classList.remove('show'); }, 1800);
+    setTimeout(()=>{ ov.classList.add('hidden'); }, 2200);
+  }
+  function drawMapPreview(){
+    const c=document.getElementById('miCanvas'); if(!c) return;
+    const S=220; c.width=S; c.height=S; const g=c.getContext('2d');
+    g.clearRect(0,0,S,S);
+    g.fillStyle='#243d38'; g.fillRect(0,0,S,S);
+    if(!mapOutline){ // fallback: full square
+      g.fillStyle='#fbf9f3'; g.fillRect(6,6,S-12,S-12);
+    } else {
+      const sc=S/GW;  // assume square grid
+      g.save();
+      g.beginPath();
+      const o=mapOutline;
+      if(o.kind==='circle'){ g.arc(o.cx*sc,o.cy*sc,o.r*sc,0,Math.PI*2); }
+      else if(o.kind==='poly'){ const p=o.pts.map(([x,y])=>[x*sc,y*sc]);
+        g.moveTo(p[0][0],p[0][1]); for(let i=1;i<p.length;i++)g.lineTo(p[i][0],p[i][1]); g.closePath(); }
+      else { const x=o.x0*sc,y=o.y0*sc,w=(o.x1-o.x0)*sc,h=(o.y1-o.y0)*sc,r=o.r*sc,rr=Math.min(r,w/2,h/2);
+        g.moveTo(x+rr,y); g.arcTo(x+w,y,x+w,y+h,rr); g.arcTo(x+w,y+h,x,y+h,rr); g.arcTo(x,y+h,x,y,rr); g.arcTo(x,y,x+w,y,rr); g.closePath(); }
+      g.fillStyle='#fbf9f3'; g.fill();
+      g.strokeStyle='#ffd23f'; g.lineWidth=3; g.stroke();
+      g.restore();
+    }
   }
 
   // ---- RENDER ----
@@ -585,7 +974,11 @@
     const x0=Math.max(0,Math.floor((-ox)/cs)-1), x1=Math.min(GW-1,Math.ceil((W-ox)/cs)+1);
     const y0=Math.max(0,Math.floor((-oy)/cs)-1), y1=Math.min(GH-1,Math.ceil((H-oy)/cs)+1);
 
-    const colorOf=(id)=>{const e=ents.get(id);return e?e.color:'#bbb';};
+    const colorOf=(id)=>{
+      const e=ents.get(id);
+      if(e){ colorCache[id]=e.color; return e.color; }
+      return colorCache[id] || '#9aa'; // remembered color, or neutral-ish fallback
+    };
     const ownerAt=(x,y)=> (x<0||y<0||x>=GW||y>=GH) ? -1 : owner[y*GW+x];
 
     // --- paper backdrop (off-white with a faint grid like graph paper) ---
@@ -597,9 +990,51 @@
     for(let y=y0;y<=y1+1;y++){const sy=oy+y*cs;ctx.moveTo(ox+x0*cs,sy);ctx.lineTo(ox+(x1+1)*cs,sy);}
     ctx.stroke();
 
-    // --- territory drop shadow pass (gives the slightly-3D "paper cutout" look)
-    // Draw every owned cell offset down-right in soft dark; the fill pass on top
-    // then sits "above" it.
+    // --- void area (outside the playable region) ---
+    // Classic: the map shape is static, so draw a clean SMOOTH cut-out.
+    // BR: the storm constantly reshapes `blocked`, so the smooth outline would
+    // be wrong — render the void directly from the live blocked grid instead so
+    // it always matches reality (no corrupted patchwork).
+    const voidColor = (activeMode==='br') ? '#3a2a55' : '#243d38';
+    if(activeMode==='br' && blocked){
+      ctx.fillStyle=voidColor;
+      for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){
+        if(blocked[y*GW+x]===1) ctx.fillRect(ox+x*cs, oy+y*cs, cs+1, cs+1);
+      }
+    } else if(blocked && mapOutline){
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(ox-2, oy-2, GW*cs+4, GH*cs+4);
+      traceOutline(ox, oy, cs);
+      ctx.fillStyle=voidColor;
+      ctx.fill('evenodd');
+      ctx.restore();
+      ctx.save();
+      traceOutline(ox, oy, cs);
+      ctx.lineJoin='round'; ctx.lineCap='round';
+      ctx.strokeStyle='rgba(120,110,90,0.55)'; ctx.lineWidth=4; ctx.stroke();
+      ctx.strokeStyle='rgba(255,255,255,0.3)'; ctx.lineWidth=1.5; ctx.stroke();
+      ctx.restore();
+    } else if(blocked){
+      ctx.fillStyle=voidColor;
+      for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){
+        if(blocked[y*GW+x]===1) ctx.fillRect(ox+x*cs, oy+y*cs, cs+1, cs+1);
+      }
+    }
+    // BR storm: glowing edge on the shrinking safe box
+    if(activeMode==='br' && brState && brState.inset>0){
+      const ins=brState.inset;
+      const sx=ox+ins*cs, sy=oy+ins*cs, sw=(GW-2*ins)*cs, sh=(GH-2*ins)*cs;
+      const pulse=0.5+0.5*Math.sin(performance.now()/300);
+      ctx.save();
+      ctx.strokeStyle='rgba(180,120,255,'+(0.6+0.3*pulse)+')';
+      ctx.lineWidth=3; ctx.shadowColor='#b478ff'; ctx.shadowBlur=14;
+      ctx.strokeRect(sx, sy, sw, sh);
+      ctx.restore();
+    }
+
+
+    // --- territory drop shadow pass (slightly-3D paper cutout look) ---
     ctx.save();
     ctx.fillStyle='rgba(70,60,45,0.18)';
     const sh=Math.max(2,cs*0.16);
@@ -761,6 +1196,34 @@
     ctx.arcTo(x,y,x+w,y,r);
     ctx.closePath();
   }
+  // Path the current map's smooth outline in screen space (ox,oy = origin, cs = cell px).
+  function traceOutline(ox, oy, cs){
+    const o=mapOutline; if(!o) return;
+    const X=v=>ox+v*cs, Y=v=>oy+v*cs;
+    ctx.beginPath();
+    if(o.kind==='circle'){
+      ctx.arc(X(o.cx), Y(o.cy), o.r*cs, 0, Math.PI*2);
+    } else if(o.kind==='poly'){
+      // rounded-corner polygon using arcTo between vertices
+      const p=o.pts.map(([x,y])=>[X(x),Y(y)]);
+      const r=Math.min(GW,GH)*0.04*cs;  // small corner rounding
+      ctx.moveTo((p[0][0]+p[1][0])/2,(p[0][1]+p[1][1])/2);
+      for(let i=0;i<p.length;i++){
+        const cur=p[(i+1)%p.length], nxt=p[(i+2)%p.length];
+        ctx.arcTo(cur[0],cur[1], (cur[0]+nxt[0])/2,(cur[1]+nxt[1])/2, r);
+      }
+      ctx.closePath();
+    } else if(o.kind==='rrect'){
+      const x=X(o.x0), y=Y(o.y0), w=(o.x1-o.x0)*cs, h=(o.y1-o.y0)*cs, r=o.r*cs;
+      const rr=Math.min(r,w/2,h/2);
+      ctx.moveTo(x+rr,y);
+      ctx.arcTo(x+w,y,x+w,y+h,rr);
+      ctx.arcTo(x+w,y+h,x,y+h,rr);
+      ctx.arcTo(x,y+h,x,y,rr);
+      ctx.arcTo(x,y,x+w,y,rr);
+      ctx.closePath();
+    }
+  }
   requestAnimationFrame(draw);
 
   // ---- start ----
@@ -797,6 +1260,9 @@
     deathScreen.classList.add('hidden');
     document.getElementById('chatToggle').classList.add('hidden');
     document.getElementById('chatPanel').classList.add('hidden');
+    document.getElementById('cheatBar').classList.add('hidden');
+    document.getElementById('stormHud').classList.add('hidden');
+    brState=null;
     joinScreen.classList.remove('hidden');
     statusEl.textContent='';
     refreshCoinUI();
@@ -804,6 +1270,14 @@
   }
   document.getElementById('homeBtn').onclick = goHome;
   document.getElementById('deathMenuBtn').onclick = goHome;
+
+  // sound mute toggle (persisted)
+  const muteBtn=document.getElementById('muteBtn');
+  store.muted = store.muted || false;
+  Sound.setEnabled(!store.muted);
+  function refreshMute(){ muteBtn.textContent = store.muted ? '🔇' : '🔊'; }
+  refreshMute();
+  muteBtn.onclick=()=>{ store.muted=!store.muted; Sound.setEnabled(!store.muted); saveStore(store); refreshMute(); };
 
   // ---- skins helper (color override; null = use player's assigned color) ----
   function skinColor(skId){
@@ -819,11 +1293,31 @@
   const shopModal=document.getElementById('shopModal');
   const skinsModal=document.getElementById('skinsModal');
   const howModal=document.getElementById('howModal');
-  function closeModals(){ shopModal.classList.add('hidden'); skinsModal.classList.add('hidden'); howModal.classList.add('hidden'); }
+  const cheatsModal=document.getElementById('cheatsModal');
+  const trophiesModal=document.getElementById('trophiesModal');
+  function closeModals(){ shopModal.classList.add('hidden'); skinsModal.classList.add('hidden'); howModal.classList.add('hidden'); cheatsModal.classList.add('hidden'); trophiesModal.classList.add('hidden'); }
   document.querySelectorAll('[data-close]').forEach(b=>b.onclick=closeModals);
-  [shopModal,skinsModal,howModal].forEach(m=>m.addEventListener('click',e=>{ if(e.target===m) closeModals(); }));
+  [shopModal,skinsModal,howModal,cheatsModal,trophiesModal].forEach(m=>m.addEventListener('click',e=>{ if(e.target===m) closeModals(); }));
 
   function renderShop(){
+    // self-heal: keep only valid, unique equipped ids within the slot limit
+    store.equip = [...new Set(store.equip.filter(id => SHOP.some(s=>s.id===id)))].slice(0, MAX_EQUIP);
+    // visible slot indicator: 3 slots, filled or empty
+    const slotBar=document.getElementById('slotBar');
+    if(slotBar){
+      let html='<div class="slots"><span class="slotlabel">Power-up slots</span>';
+      for(let i=0;i<MAX_EQUIP;i++){
+        const id=store.equip[i];
+        const p=id?SHOP.find(s=>s.id===id):null;
+        html+= p ? `<span class="slot filled" data-unequip="${id}" title="Tap to remove">${p.ic}</span>`
+                 : `<span class="slot empty">+</span>`;
+      }
+      html+='</div>';
+      slotBar.innerHTML=html;
+      slotBar.querySelectorAll('[data-unequip]').forEach(b=>b.onclick=()=>{
+        store.equip=store.equip.filter(x=>x!==b.dataset.unequip); saveStore(store); renderShop();
+      });
+    }
     const grid=document.getElementById('shopGrid');
     grid.innerHTML = SHOP.map(p=>{
       const owned = !!store.owned[p.id];
@@ -843,7 +1337,7 @@
     }).join('');
     grid.querySelectorAll('[data-buy]').forEach(b=>b.onclick=()=>{
       const p=SHOP.find(s=>s.id===b.dataset.buy);
-      if(store.coins>=p.cost){ store.coins-=p.cost; store.owned[p.id]=true; saveStore(store); renderShop(); refreshCoinUI(); }
+      if(store.coins>=p.cost){ store.coins-=p.cost; store.owned[p.id]=true; store.coinsSpent=(store.coinsSpent||0)+p.cost; saveStore(store); if(store.coinsSpent>=10000) awardTrophy("bigspender"); renderShop(); refreshCoinUI(); }
     });
     grid.querySelectorAll('[data-equip]').forEach(b=>b.onclick=()=>{
       if(store.equip.length<MAX_EQUIP && !store.equip.includes(b.dataset.equip)){ store.equip.push(b.dataset.equip); saveStore(store); renderShop(); refreshCoinUI(); }
@@ -869,7 +1363,7 @@
     }).join('');
     grid.querySelectorAll('[data-buyskin]').forEach(b=>b.onclick=()=>{
       const s=SKINS.find(x=>x.id===b.dataset.buyskin);
-      if(store.coins>=s.cost){ store.coins-=s.cost; store.skins[s.id]=true; saveStore(store); renderSkins(); refreshCoinUI(); }
+      if(store.coins>=s.cost){ store.coins-=s.cost; store.skins[s.id]=true; store.coinsSpent=(store.coinsSpent||0)+s.cost; saveStore(store); if(store.coinsSpent>=10000) awardTrophy("bigspender"); renderSkins(); refreshCoinUI(); }
     });
     grid.querySelectorAll('[data-equipskin]').forEach(b=>b.onclick=()=>{
       store.skin=b.dataset.equipskin; saveStore(store); renderSkins(); refreshCoinUI();
@@ -880,6 +1374,84 @@
   document.getElementById('skinsBtn').onclick=()=>{ renderSkins(); skinsModal.classList.remove('hidden'); };
   document.getElementById('howBtn').onclick=()=>{ howModal.classList.remove('hidden'); };
   document.getElementById('howGotIt').onclick=closeModals;
+  document.getElementById('cheatsBtn').onclick=()=>{ renderCheats(); cheatsModal.classList.remove('hidden'); };
+  document.getElementById('trophiesBtn').onclick=()=>{ renderTrophies(); trophiesModal.classList.remove('hidden'); };
+
+  function renderTrophies(){
+    store.trophies=store.trophies||{};
+    const unlocked=TROPHIES.filter(t=>store.trophies[t.id]).length;
+    document.getElementById('trophyCount').textContent=unlocked+' / '+TROPHIES.length;
+    const grid=document.getElementById('trophyGrid');
+    grid.innerHTML=TROPHIES.map(t=>{
+      const got=!!store.trophies[t.id];
+      return `<div class="item" style="opacity:${got?1:0.55}">`+
+        `<div class="ic">${got?t.ic:'🔒'}</div><div class="nm">${t.nm}</div>`+
+        `<div class="ds">${t.ds}</div>`+
+        `<div class="ds" style="color:${got?'#2b7a4b':'#9a8f7a'};font-weight:700">${got?'Unlocked':'Locked'}</div></div>`;
+    }).join('');
+  }
+
+  // ---- CHEATS: buy (consumable) ----
+  function renderCheats(){
+    const grid=document.getElementById('cheatGrid');
+    grid.innerHTML = CHEATS.map(c=>{
+      const have = store.cheats[c.id]||0;
+      const can = store.coins>=c.cost;
+      const haveTag = have>0 ? `<div class="ds" style="color:#2b7a4b;font-weight:700">Owned: ${have}</div>` : '';
+      const btn = `<button class="${can?'locked':'cant'}" data-buycheat="${c.id}">${can?('Buy ● '+c.cost):('Need ● '+c.cost)}</button>`;
+      return `<div class="item"><div class="ic">${c.ic}</div><div class="nm">${c.nm}</div>`+
+             `<div class="ds">${c.ds}</div>${haveTag}${btn}</div>`;
+    }).join('');
+    grid.querySelectorAll('[data-buycheat]').forEach(b=>b.onclick=()=>{
+      const c=CHEATS.find(x=>x.id===b.dataset.buycheat);
+      if(store.coins>=c.cost){ store.coins-=c.cost; store.cheats[c.id]=(store.cheats[c.id]||0)+1;
+        store.coinsSpent=(store.coinsSpent||0)+c.cost; saveStore(store);
+        if(store.coinsSpent>=10000) awardTrophy('bigspender');
+        renderCheats(); refreshCoinUI(); renderCheatBar(); }
+    });
+    refreshCoinUI();
+  }
+
+  // ---- CHEATS: in-game bar + activation ----
+  function renderCheatBar(){
+    const bar=document.getElementById('cheatBar');
+    const owned=CHEATS.filter(c=>(store.cheats[c.id]||0)>0);
+    if(!connected || owned.length===0){ bar.classList.add('hidden'); bar.innerHTML=''; return; }
+    bar.classList.remove('hidden');
+    bar.innerHTML = owned.map((c,i)=>{
+      const n=store.cheats[c.id];
+      const key=(i+1)<=9?(i+1):0;
+      return `<button class="cb" data-usecheat="${c.id}" title="${c.nm}">${c.ic}`+
+             `<span class="ct">${n}</span><span class="key">${key}</span></button>`;
+    }).join('');
+    bar.querySelectorAll('[data-usecheat]').forEach(b=>b.onclick=()=>useCheat(b.dataset.usecheat));
+  }
+  function useCheat(id){
+    if(!connected || isDead) return;
+    if((store.cheats[id]||0)<=0) return;
+    Sound.cheat();
+    // count toward Cheat Lord
+    store.cheatsUsed=(store.cheatsUsed||0)+1;
+    if(store.cheatsUsed>=10) awardTrophy('cheatlord');
+    // Mach Speed sets a window for the Speed Demon achievement
+    if(id==='mach') machUntil=performance.now()+20000;
+    // client-side effects
+    if(id==='grand'){ store.cheats[id]--; addCoins(1000); flashCoins('+1000 grand'); saveStore(store); renderCheatBar(); return; }
+    // tell server to apply the real effect
+    if(ws&&ws.readyState===1){ ws.send(JSON.stringify({t:'cheat', id})); }
+    store.cheats[id]--; saveStore(store); renderCheatBar();
+    const c=CHEATS.find(x=>x.id===id);
+    flashBanner((c?c.ic+' ':'')+(c?c.nm:'Cheat')+' activated!', '#ffd23f');
+  }
+  // number keys 1-0 trigger owned cheats by slot
+  addEventListener('keydown',(e)=>{
+    const tag=(e.target&&e.target.tagName)||''; if(tag==='INPUT'||tag==='TEXTAREA') return;
+    if(!connected||isDead) return;
+    const owned=CHEATS.filter(c=>(store.cheats[c.id]||0)>0);
+    let slot=-1;
+    if(e.code.startsWith('Digit')){ const d=+e.code.slice(5); slot = d===0?9:d-1; }
+    if(slot>=0 && slot<owned.length){ useCheat(owned[slot].id); e.preventDefault(); }
+  });
 
   // ---- coin flash feedback ----
   let flashTimer=null;
@@ -1009,6 +1581,48 @@
       raf=requestAnimationFrame(step);
     }
     step();
+  })();
+
+  // ---- secret code: click P-A-P-E-R (in order) within 15s -> 10,000 coins ----
+  (function paperCode(){
+    const SEQ = ['P','A','P2','E','R'];
+    let progress = 0, startTime = 0, lastReward = 0;
+    const letters = document.querySelectorAll('.logo3d .L[data-letter]');
+    function resetSeq(){
+      progress = 0;
+      letters.forEach(l=>l.classList.remove('lit'));
+    }
+    letters.forEach(l=>{
+      l.addEventListener('click', ()=>{
+        const now = Date.now();
+        if (progress === 0) startTime = now;
+        // 15-second window from the first letter
+        if (now - startTime > 15000) { resetSeq(); startTime = now; }
+        if (l.dataset.letter === SEQ[progress]) {
+          l.classList.add('lit');
+          progress++;
+          if (progress === SEQ.length) {
+            // 1-minute cooldown, persisted so refreshing can't farm it
+            const COOLDOWN = 60*1000;
+            const nowMs = Date.now();
+            if (nowMs - (store.paperCodeAt||0) >= COOLDOWN) {
+              store.paperCodeAt = nowMs; saveStore(store);
+              addCoins(1000000);
+              flashCoins('+1,000,000 secret!');
+              flashBanner('🎉 Secret PAPER code! +1,000,000 coins', '#ffd23f');
+            } else {
+              const secsLeft = Math.ceil((COOLDOWN - (nowMs - store.paperCodeAt))/1000);
+              flashBanner('Secret code recharges in '+secsLeft+'s', '#9fb0aa');
+            }
+            setTimeout(resetSeq, 400);
+          }
+        } else {
+          // wrong letter — restart, but count this click as a possible new start
+          resetSeq();
+          if (l.dataset.letter === SEQ[0]) { l.classList.add('lit'); progress = 1; startTime = now; }
+        }
+      });
+    });
   })();
 
   refreshCoinUI();
