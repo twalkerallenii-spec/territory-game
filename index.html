@@ -682,7 +682,8 @@
         if(now < machUntil) awardTrophy('speeddemon');
         // Untouchable/Flawless tracking: a kill doesn't break these; being cut does
       }
-      else if (m.t==='fullmap'){ Sound.win(); const c=Math.round((m.coins||1000)*coinMult); addCoins(c); flashCoins('+'+c+' 100%!'); awardTrophy('conqueror'); }
+      else if (m.t==='fullmap'){ Sound.win(); const c=Math.round((m.coins||1000)*coinMult); addCoins(c); flashCoins('+'+c+' Domination!'); awardTrophy('conqueror'); }
+      else if (m.t==='roundwin'){ Sound.win(); const c=Math.round((m.coins||250)*coinMult); addCoins(c); flashCoins('+'+c+' Round Winner!'); }
       else if (m.t==='chat'){ addChat(m.name, m.color, m.text); }
     };
   }
@@ -701,18 +702,36 @@
     }
     for (const id of [...ents.keys()]) if(!seen.has(id)){ ents.delete(id); view.delete(id); }
     brState = m.br || null;
+    rtSecs = (m.rt == null) ? null : m.rt;
+    lastStateAt = performance.now();
     updateHud();
     updateBoostMeter();
     updateStormHud();
     drawMinimap();
   }
   let brState = null;
+  let rtSecs = null;             // classic round countdown (from server)
+  let lastStateAt = 0;           // when the last snapshot arrived (for extrapolation)
+  let predHeading = null, predSince = 0;   // locally-predicted heading (instant turns)
+  const DIRV = {N:[0,-1],E:[1,0],S:[0,1],W:[-1,0]};
+  const OPPD = {N:'S',S:'N',E:'W',W:'E'};
+  const SIM_SPEED = 13, SIM_BOOST = 1.7;   // must match server CELLS_PER_SEC / BOOST_MULT
 
   // Fortnite-style storm HUD: countdown + alive count
   function updateStormHud(){
     const el=document.getElementById('stormHud');
     if(!el) return;
-    if(!brState || activeMode!=='br'){ el.classList.add('hidden'); return; }
+    if(activeMode!=='br'){
+      // Classic: same pill shows the round countdown + current leader
+      if(rtSecs==null){ el.classList.add('hidden'); return; }
+      el.classList.remove('hidden');
+      const m=Math.floor(rtSecs/60), s=rtSecs%60;
+      document.getElementById('stormLabel').textContent='⏱ Round ends '+m+':'+(s<10?'0':'')+s;
+      let lead=null; for(const e of ents.values()){ if(!lead||e.area>lead.area) lead=e; }
+      document.getElementById('stormAlive').textContent = lead ? ('👑 '+lead.name) : '';
+      return;
+    }
+    if(!brState){ el.classList.add('hidden'); return; }
     el.classList.remove('hidden');
     const mins=Math.floor(brState.secs/60), secs=brState.secs%60;
     const tstr=mins+':'+(secs<10?'0':'')+secs;
@@ -772,14 +791,21 @@
     }
     if (isDead) return;                       // no steering while spectating
     const d = KEYMAP[e.code];
-    if (d && connected && ws && ws.readyState===1){ ws.send(JSON.stringify({t:'turn', d})); e.preventDefault(); }
+    if (d && connected && ws && ws.readyState===1){ sendTurn(d); e.preventDefault(); }
   });
   // ---- PHONE TOUCH CONTROLS ----
   // Swipe in a direction to turn (fires mid-drag so it feels responsive, no need
   // to lift your finger). A quick tap (no movement) respawns when dead.
   let tsx=0, tsy=0, tMoved=false, lastSwipeT=0;
   const SWIPE_MIN=22;          // px of movement before a swipe registers
-  function sendTurn(d){ if(connected&&ws&&ws.readyState===1) ws.send(JSON.stringify({t:'turn',d})); }
+  function sendTurn(d){
+    if(connected&&ws&&ws.readyState===1) ws.send(JSON.stringify({t:'turn',d}));
+    // predict the turn locally (server still decides; render just leads it).
+    // Mirror the server's rule: you can't reverse into yourself.
+    const me=ents.get(myId);
+    const cur=predHeading||(me&&me.h);
+    if(!isDead && me && d!==OPPD[cur]){ predHeading=d; predSince=performance.now(); }
+  }
   addEventListener('touchstart',e=>{
     const t=e.changedTouches[0]; tsx=t.clientX; tsy=t.clientY; tMoved=false;
   },{passive:true});
@@ -956,10 +982,25 @@
     ctx.clearRect(0,0,W,H);
     if(!owner){return;}
 
-    // interpolate entity render positions toward latest server pos
+    // PREDICTED interpolation: extrapolate each avatar forward from its last
+    // snapshot along its heading (my own avatar uses my locally-predicted
+    // heading, so turns feel instant), then pull the render pos toward that.
+    const nowMs=performance.now();
+    const stateAge=Math.min(0.15,(nowMs-lastStateAt)/1000);  // cap so lag spikes don't fling us
     for(const [id,e] of ents){
       const v=view.get(id); if(!v)continue;
-      v.x=lerp(v.x,e.x,0.35); v.y=lerp(v.y,e.y,0.35);
+      let h=e.h;
+      if(id===myId && predHeading && !isDead){
+        // server confirmed the turn, or prediction expired -> drop it
+        if(e.h===predHeading || nowMs-predSince>400) predHeading=null;
+        else h=predHeading;
+      }
+      const D=DIRV[h]||[0,0];
+      const spd=SIM_SPEED*(e.bo?SIM_BOOST:1);
+      const tx=e.x+D[0]*spd*stateAge, ty=e.y+D[1]*spd*stateAge;
+      v.x=lerp(v.x,tx,0.35); v.y=lerp(v.y,ty,0.35);
+      // respawn/teleport: don't glide across the map, just snap
+      if(Math.abs(v.x-tx)>5||Math.abs(v.y-ty)>5){ v.x=tx; v.y=ty; }
     }
     // camera follows me — or my killer while I'm spectating
     const camTargetId = (isDead && spectateId!=null) ? spectateId : myId;

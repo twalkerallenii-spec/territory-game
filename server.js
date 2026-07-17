@@ -21,15 +21,18 @@ const BOOST_COOLDOWN_MS = 10000;      // then 10s to recharge
 const ROOM_CAP = 22;                  // max entities (humans + bots)
 const MIN_BOTS = 6;                   // CPU field (was 12)
 const BR_START_BOTS = 14;             // Battle Royale starts with a full lobby
-const BR_STORM_START_MS = 25000;      // grace period before the storm begins
-const BR_STORM_SHRINK_MS = 90000;     // time for the storm to fully close in
+const BR_STORM_START_MS = +process.env.BR_GRACE_MS || 15000;   // grace period before the storm begins (was 25s)
+const BR_STORM_SHRINK_MS = +process.env.BR_SHRINK_MS || 60000;  // time for the storm to fully close in (was 90s)
 const BR_COIN_WIN = 2000;             // coins for a Victory Royale
 const SPAWN_BLOB = 3;                 // half-size of starting square (3 => 7x7)
 const SPAWN_SAFE_RADIUS = 14;         // min cells to nearest enemy avatar/trail
 const BOT_RESPAWN_MS = 120000;        // bots stay dead 2 minutes before auto-respawn
 const PLAYER_MIN_DEAD_MS = 0;         // humans respawn instantly on Space press
 const COIN_PER_KILL = 20;             // coins for cutting a rival
-const COIN_FULL_MAP = 1000;           // coins for controlling 100% of the map
+const COIN_FULL_MAP = 1000;           // coins for dominating the map (WIN_FRAC)
+const COIN_ROUND_WIN = 250;           // coins for having the most land at time-up
+const WIN_FRAC = 0.60;                // own this fraction of the map -> instant round win (was 0.99)
+const ROUND_DURATION_MS = +process.env.ROUND_MS || 180000;  // classic round length: 3 min, then biggest territory wins
 const PORT = process.env.PORT || 3000;
 
 const CELL_PER_TICK = CELLS_PER_SEC / TICK_RATE;
@@ -122,6 +125,7 @@ function makeRoom(mode) {
     roundResetting: false,
     freezeUntil: 0,
     freezeCasterId: 0,
+    roundMsLeft: ROUND_DURATION_MS,   // classic: countdown to timed round end
     // Battle Royale match state
     brActive: false,
     brEnding: false,
@@ -532,8 +536,8 @@ function updateBrStorm() {
   const elapsed = Date.now() - activeRoom.brStart;
   if (elapsed < BR_STORM_START_MS) return;     // grace period, no shrink yet
   const prog = Math.min(1, (elapsed - BR_STORM_START_MS) / BR_STORM_SHRINK_MS);
-  // max inset leaves a small arena in the middle (~24 cells across)
-  const maxInset = Math.floor((Math.min(GRID_W, GRID_H) / 2) - 12);
+  // storm closes almost completely (~6-cell arena) so a match can never stall
+  const maxInset = Math.floor((Math.min(GRID_W, GRID_H) / 2) - 3);
   const inset = Math.floor(prog * maxInset);
   if (inset <= activeRoom.brStormInset) return; // only grows
   activeRoom.brStormInset = inset;
@@ -682,12 +686,12 @@ function captureTerritory(e) {
     if (enemy) recomputeArea(enemy);
   }
 
-  // ROUND WIN: dominating the map (≈100%) wipes the board and restarts everyone
-  // fresh. The winner gets the big coin reward.
+  // ROUND WIN: dominating the map (WIN_FRAC, default 60%) wipes the board and
+  // restarts everyone fresh. The winner gets the big coin reward.
   // count only PLAYABLE cells (blocked void cells can never be owned)
   let total = 0;
   for (let i = 0; i < blocked.length; i++) if (blocked[i] === 0) total++;
-  if (e.area >= total * 0.99 && !roundResetting) {
+  if (e.area >= total * WIN_FRAC && !roundResetting) {
     if (!e.isBot && e.ws && e.ws.readyState === 1) {
       send(e.ws, { t: 'fullmap', coins: COIN_FULL_MAP });
     }
@@ -699,6 +703,7 @@ function captureTerritory(e) {
 let roundResetting = false;   // rebound per room
 function roundReset(winner) {
   roundResetting = true;
+  if (activeRoom) activeRoom.roundMsLeft = ROUND_DURATION_MS;   // fresh timer every round
   owner.fill(0);
   trail.fill(0);
   // pick a new random map shape for the next round
@@ -1073,6 +1078,16 @@ function tick() {
 function tickRoom() {
   const now = Date.now();
 
+  // Rooms with no humans aren't ticked, but the BR storm clock is wall-time —
+  // without this, the first player joining an idle BR room would meet a fully
+  // closed storm and die instantly. Shift the match start by the idle gap so
+  // the storm effectively pauses while the room is empty.
+  if (activeRoom.lastTick && now - activeRoom.lastTick > 2000 &&
+      activeRoom.mode === 'br' && activeRoom.brActive) {
+    activeRoom.brStart += now - activeRoom.lastTick;
+  }
+  activeRoom.lastTick = now;
+
   // Boost lifecycle: end an active boost when its window closes.
   for (const e of entities.values()) {
     if (e.boosting && now >= e.boostUntil) {
@@ -1113,6 +1128,26 @@ function tickRoom() {
       }
     }
     checkBrWin();
+  }
+
+  // Classic: timed rounds. The clock only runs while humans are in the room
+  // (tick() skips empty rooms). At zero, the biggest territory wins the round.
+  if (activeRoom && activeRoom.mode === 'classic' && !roundResetting) {
+    activeRoom.roundMsLeft -= 1000 / TICK_RATE;
+    if (activeRoom.roundMsLeft <= 0) {
+      let best = null;
+      for (const e of entities.values()) {
+        if (!e.dead && (!best || e.area > best.area)) best = e;
+      }
+      if (best && best.area > 0) {
+        if (!best.isBot && best.ws && best.ws.readyState === 1) {
+          send(best.ws, { t: 'roundwin', coins: COIN_ROUND_WIN });
+        }
+        roundReset(best);            // also refills the timer
+      } else {
+        activeRoom.roundMsLeft = ROUND_DURATION_MS;
+      }
+    }
   }
 
   maintainBots();
@@ -1175,6 +1210,9 @@ function broadcastState() {
     }
     br = { inset: activeRoom.brStormInset, phase, secs: Math.max(0, secsToNext), alive: aliveCount, total: BR_START_BOTS + 1 };
   }
+  // Classic: seconds left in the timed round (client shows a countdown pill).
+  const rt = (activeRoom && activeRoom.mode === 'classic')
+    ? Math.max(0, Math.ceil(activeRoom.roundMsLeft / 1000)) : null;
 
   // NOTE: we always send the full owner grid. (An earlier "send only when
   // changed" optimization caused late-joiners to start with an empty grid and
@@ -1187,6 +1225,7 @@ function broadcastState() {
     trail: rleEncode(trail),
     ents,
     br,
+    rt,
   });
   for (const e of entities.values()) {
     if (e.ws && e.ws.readyState === 1) e.ws.send(msg);
