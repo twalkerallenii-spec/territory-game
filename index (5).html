@@ -231,15 +231,135 @@
     font-size:20px;border:2px dashed var(--line);}
   .slot.empty{color:#c7bfae;}
   .slot.filled{border-style:solid;border-color:var(--accent);background:rgba(255,90,122,.08);cursor:pointer;}
+  .setrow{display:flex;align-items:center;gap:8px;margin:10px 0 2px;color:#9fb0aa;font-size:12px;}
+  .setrow input[type=range]{flex:1;accent-color:#ffd23f;}
+  .lowgfx{display:flex;align-items:center;gap:4px;white-space:nowrap;cursor:pointer;}
+  #killFeed{position:fixed;top:60px;right:230px;z-index:7;display:flex;flex-direction:column;
+    gap:4px;align-items:flex-end;pointer-events:none;max-width:40vw;}
+  .feedline{background:rgba(20,32,28,.85);border:1px solid rgba(255,255,255,.1);border-radius:8px;
+    padding:4px 10px;font-size:12px;color:#e8efec;opacity:1;transition:opacity .5s;}
+  .feedline .fk{font-weight:800;}
+  @keyframes confallA{to{transform:translateY(110vh) rotate(340deg);opacity:.9;}}
+  .confetti{position:fixed;top:-6vh;z-index:30;pointer-events:none;font-size:22px;
+    animation:confallA 2.4s linear forwards;}
+
+  /* teams leaderboard stat sub-rows */
+  .trow{display:flex;flex-direction:column;gap:1px;margin:-2px 0 6px 26px;}
+  .tstat{font-size:10px;color:#9fb0aa;letter-spacing:.01em;}
+
   /* 3D mode canvas — same layer as the 2D game canvas */
   #game3d{position:fixed;inset:0;width:100%;height:100%;display:block;}
   #game3d.hidden{display:none;}
+
+  /* ================= DESIGN 2.0 ================= */
+  /* 1) design tokens */
+  :root{
+    --d-accent:#ffd23f; --d-accent2:#ff9f1c; --d-teal:#46f0d4;
+    --d-glass:rgba(16,28,24,.72); --d-glass-brd:rgba(255,255,255,.14);
+    --d-ink:#eef5f1; --d-sub:#9fb0aa;
+    --d-shadow:0 18px 44px rgba(0,0,0,.42), 0 2px 8px rgba(0,0,0,.28);
+    --d-r-lg:18px; --d-r-md:13px;
+    --d-ease:cubic-bezier(.22,1,.36,1);
+  }
+  /* 2) global type polish */
+  body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;}
+  h1,h2,.mt,#miName{letter-spacing:-.02em;}
+  #coinAmt,.pct,.rank{font-variant-numeric:tabular-nums;}
+  /* 3) glass HUD cards */
+  #hud .card{background:var(--d-glass);border:1px solid var(--d-glass-brd);
+    color:var(--d-ink);border-radius:var(--d-r-lg);box-shadow:var(--d-shadow);
+    backdrop-filter:blur(14px) saturate(1.2);-webkit-backdrop-filter:blur(14px) saturate(1.2);}
+  #hud .card h2{color:var(--d-sub);font-size:11px;letter-spacing:.22em;text-transform:uppercase;}
+  /* 4) leaderboard rows */
+  #boardRows .row{padding:5px 6px;border-radius:9px;transition:background .2s var(--d-ease);}
+  #boardRows .row:hover{background:rgba(255,255,255,.05);}
+  #boardRows .row.me{background:linear-gradient(90deg,rgba(255,210,63,.16),transparent);
+    box-shadow:inset 2px 0 0 var(--d-accent);}
+  #boardRows .row:nth-child(1) .rank{color:#ffd23f;text-shadow:0 0 10px rgba(255,210,63,.55);}
+  #boardRows .row:nth-child(2) .rank{color:#cfd6dd;}
+  #boardRows .row:nth-child(3) .rank{color:#e0a05f;}
+  #boardRows .rank{font-weight:900;}
+  #boardRows .dot{box-shadow:0 0 0 2px rgba(255,255,255,.12), 0 0 8px currentColor;}
+  /* 5) your-territory stat + progress hint */
+  #mystat{overflow:hidden;position:relative;}
+  #myArea{font-size:22px;font-weight:900;background:linear-gradient(180deg,#fff,#cfe8dd);
+    -webkit-background-clip:text;background-clip:text;color:transparent;}
+  /* 6) primary button system */
+  #playBtn{background:linear-gradient(180deg,var(--d-accent),var(--d-accent2));
+    border:none;border-radius:14px;box-shadow:0 8px 22px rgba(255,159,28,.35), inset 0 1px 0 rgba(255,255,255,.5);
+    transition:transform .15s var(--d-ease), box-shadow .15s var(--d-ease);}
+  #playBtn:hover{transform:translateY(-2px);box-shadow:0 12px 28px rgba(255,159,28,.45), inset 0 1px 0 rgba(255,255,255,.5);}
+  #playBtn:active{transform:translateY(0) scale(.985);}
+  /* 7) ghost buttons */
+  button.ghost{border:1px solid rgba(255,255,255,.12);border-radius:12px;
+    transition:transform .15s var(--d-ease), background .2s, color .2s;}
+  button.ghost:hover{transform:translateY(-1px);}
+  button.ghost:active{transform:translateY(0) scale(.98);}
+  /* 8) focus rings everywhere */
+  button:focus-visible,input:focus-visible{outline:2px solid var(--d-accent);outline-offset:2px;border-radius:10px;}
+  /* 9) mode cards */
+  .modeopt{transition:transform .18s var(--d-ease), background .2s, border-color .2s;}
+  .modeopt:hover{transform:translateY(-2px);}
+  .modeopt.active{border-color:var(--d-accent);
+    background:linear-gradient(180deg,rgba(255,210,63,.18),rgba(255,210,63,.06));
+    box-shadow:0 6px 18px rgba(255,210,63,.18);}
+  .modeopt .mi{filter:drop-shadow(0 3px 6px rgba(0,0,0,.35));}
+  /* 10) modal overhaul */
+  .modal{background:rgba(8,14,12,.55);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);}
+  .modalcard{border-radius:22px;box-shadow:var(--d-shadow);
+    animation:d2ModalIn .28s var(--d-ease);}
+  @keyframes d2ModalIn{from{opacity:0;transform:translateY(16px) scale(.97);}to{opacity:1;transform:none;}}
+  /* 11) shop/skins/cheats item cards */
+  .item{transition:transform .18s var(--d-ease), box-shadow .18s var(--d-ease);border-radius:16px;}
+  .item:hover{transform:translateY(-3px);box-shadow:0 12px 26px rgba(0,0,0,.14);}
+  .item .ic{font-size:30px;filter:drop-shadow(0 3px 5px rgba(0,0,0,.18));}
+  /* 12) boost meter glow */
+  #boostBar{border-radius:99px;overflow:hidden;box-shadow:inset 0 1px 3px rgba(0,0,0,.4);}
+  #boostFill{border-radius:99px;}
+  #boostFill.ready{box-shadow:0 0 14px rgba(60,208,112,.75);}
+  /* 13) minimap frame */
+  #minimap{border-radius:14px;border:1px solid var(--d-glass-brd);opacity:.94;
+    box-shadow:var(--d-shadow);}
+  /* 14) kill feed slide-in */
+  .feedline{animation:d2FeedIn .25s var(--d-ease);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
+    border-radius:10px;box-shadow:0 4px 14px rgba(0,0,0,.3);}
+  @keyframes d2FeedIn{from{opacity:0;transform:translateX(14px);}to{opacity:1;transform:none;}}
+  /* 15) storm HUD pill */
+  #stormHud{border-radius:99px;padding:8px 20px;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+    background:linear-gradient(180deg,rgba(74,48,110,.9),rgba(52,34,80,.9));
+    border:1px solid rgba(190,150,255,.45);box-shadow:0 8px 24px rgba(90,50,160,.4);}
+  #stormLabel{animation:d2StormPulse 2s ease-in-out infinite;}
+  @keyframes d2StormPulse{50%{opacity:.75;}}
+  /* 16) chat panel glass */
+  #chatPanel{backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-radius:16px;
+    box-shadow:var(--d-shadow);}
+  /* 17) death & results screens: vignette + trophy pop */
+  #deathScreen{background:radial-gradient(120% 120% at 50% 45%, transparent 40%, rgba(0,0,0,.45));}
+  #roundEnd .modalcard, #brResult > div{animation:d2ModalIn .35s var(--d-ease);}
+  .brplace{filter:drop-shadow(0 6px 14px rgba(0,0,0,.4));}
+  /* 18) coin bar bump */
+  .coinbar{transition:transform .15s var(--d-ease);}
+  .coinbar.bump{animation:d2CoinBump .35s var(--d-ease);}
+  @keyframes d2CoinBump{30%{transform:scale(1.12);}100%{transform:scale(1);}}
+  /* 19) themed thin scrollbars */
+  .modalcard::-webkit-scrollbar{width:8px;}
+  .modalcard::-webkit-scrollbar-thumb{background:rgba(0,0,0,.18);border-radius:8px;}
+  .modalcard::-webkit-scrollbar-track{background:transparent;}
+  #chatMsgs::-webkit-scrollbar{width:6px;}
+  #chatMsgs::-webkit-scrollbar-thumb{background:rgba(255,255,255,.2);border-radius:6px;}
+  /* 20) motion respect: low-gfx + reduced-motion strip the heavy effects */
+  body.lowgfx *{backdrop-filter:none!important;-webkit-backdrop-filter:none!important;}
+  body.lowgfx .item:hover,body.lowgfx .modeopt:hover,body.lowgfx #playBtn:hover{transform:none;}
+  @media (prefers-reduced-motion: reduce){
+    *,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important;}
+  }
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 </head>
 <body>
 <canvas id="game"></canvas>
 <canvas id="game3d" class="hidden"></canvas>
+<div id="killFeed"></div>
 
 <div id="hud" class="hidden">
   <div id="mystat" class="card">
@@ -287,7 +407,10 @@
         <span class="L" data-letter="P" style="--d:0">P</span><span class="L" data-letter="A" style="--d:1">A</span><span class="L" data-letter="P2" style="--d:2">P</span><span class="L" data-letter="E" style="--d:3">E</span><span class="L" data-letter="R" style="--d:4">R</span><span class="L io" style="--d:5">io</span>
       </div>
       <div class="sub">Leave home, draw a loop, return to fill it.<br>Cut a rival's trail and steal everything they own.</div>
-      <input id="nameInput" maxlength="16" placeholder="enter your name" autocomplete="off" />
+      <div style="display:flex;gap:8px;align-items:center;">
+        <input id="nameInput" maxlength="16" placeholder="enter your name" autocomplete="off" style="flex:1;" />
+        <button class="ghost" id="diceBtn" title="Random name" style="padding:10px 12px;">🎲</button>
+      </div>
       <div class="modepick">
         <button class="modeopt active" data-mode="classic">
           <span class="mi">♾️</span><span class="mt">Classic</span><span class="md">Endless · respawn</span>
@@ -298,6 +421,14 @@
         <button class="modeopt" data-mode="3d">
           <span class="mi">🧊</span><span class="mt">3D</span><span class="md">Chase cam · classic rules</span>
         </button>
+        <button class="modeopt" data-mode="teams">
+          <span class="mi">🤝</span><span class="mt">Teams</span><span class="md">2v2 · shared land</span>
+        </button>
+      </div>
+      <div class="setrow">
+        <span>🔊</span>
+        <input type="range" id="volSlider" min="0" max="100" step="5" />
+        <label class="lowgfx"><input type="checkbox" id="lowGfxChk" /> ⚡ Low graphics</label>
       </div>
       <button id="playBtn">
         <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" style="vertical-align:-3px;margin-right:8px"><path d="M8 5v14l11-7z"/></svg>
@@ -309,10 +440,20 @@
         <button class="ghost" id="skinsBtn">🎨 Skins</button>
         <button class="ghost" id="cheatsBtn">😈 Cheats</button>
         <button class="ghost" id="trophiesBtn">🏆 Trophies</button>
+        <button class="ghost" id="statsBtn">📊 Stats</button>
       </div>
       <div class="hint">↑ ↓ ← → / WASD to steer · SHIFT to boost · SPACE to respawn</div>
       <div class="hint" id="loadoutHint"></div>
     </div>
+  </div>
+</div>
+
+<!-- STATS modal -->
+<div id="statsModal" class="modal hidden">
+  <div class="modalcard">
+    <div class="modalhead"><span>📊 Lifetime Stats</span><button class="x" data-close>✕</button></div>
+    <p class="modalsub">Saved in this browser.</p>
+    <div id="statsGrid" class="grid"></div>
   </div>
 </div>
 
@@ -438,7 +579,7 @@
 
   // ---- SOUND (synthesized via Web Audio — no files to host) ----------------
   const Sound = (()=>{
-    let ac=null, enabled=true;
+    let ac=null, enabled=true, volume=1;
     function ctx(){ if(!ac){ try{ ac=new (window.AudioContext||window.webkitAudioContext)(); }catch(_){ } } return ac; }
     function unlock(){ const a=ctx(); if(a && a.state==='suspended') a.resume(); }
     addEventListener('pointerdown', unlock);
@@ -450,13 +591,14 @@
       osc.type=type; osc.frequency.setValueAtTime(freq, t0);
       if(slideTo) osc.frequency.exponentialRampToValueAtTime(slideTo, t0+dur);
       g.gain.setValueAtTime(0.0001, t0);
-      g.gain.exponentialRampToValueAtTime(vol, t0+0.01);
+      g.gain.exponentialRampToValueAtTime(Math.max(0.0001, vol*volume), t0+0.01);
       g.gain.exponentialRampToValueAtTime(0.0001, t0+dur);
       osc.connect(g); g.connect(a.destination);
       osc.start(t0); osc.stop(t0+dur+0.02);
     }
     return {
       setEnabled(v){ enabled=v; },
+      setVolume(v){ volume=Math.max(0,Math.min(1,v)); },
       isEnabled(){ return enabled; },
       capture(){ tone({freq:520,type:'triangle',dur:0.10,vol:0.22,slideTo:780}); },
       coin(){ tone({freq:880,type:'square',dur:0.06,vol:0.15}); tone({freq:1320,type:'square',dur:0.07,vol:0.13,delay:0.06}); },
@@ -586,11 +728,34 @@
   store.coinsSpent = store.coinsSpent || 0;          // total coins spent (shop+cheats)
   store.cheatsUsed = store.cheatsUsed || 0;          // total cheats activated
   store.matchesPlayed = store.matchesPlayed || 0;    // total matches joined
+  store.volume = (typeof store.volume==='number') ? store.volume : 1;
+  store.lowGfx = !!store.lowGfx;
   saveStore(store);
+  Sound.setVolume(store.volume);
+  document.body.classList.toggle('lowgfx', !!store.lowGfx);
+  // DAILY LOGIN BONUS: +500 coins the first time you open the game each day.
+  (function dailyBonus(){
+    const today = new Date().toDateString();
+    if (store.dailyAt !== today){
+      store.dailyAt = today; saveStore(store);
+      addCoins(500);
+      setTimeout(()=>flashBanner('🗓️ Daily bonus: +500 coins!', '#ffd23f'), 600);
+    }
+  })();
 
-  function addCoins(n){ store.coins = Math.min(100000000, (store.coins||0) + n); saveStore(store); refreshCoinUI(); if(store.coins>=50000) awardTrophy('loaded'); }
+  let lastCoinReport = 0;
+  function reportCoins(){
+    // teams leaderboard shows coin balances; keep the server informed (throttled)
+    const now = Date.now();
+    if (now - lastCoinReport < 4000) return;
+    lastCoinReport = now;
+    if (connected && ws && ws.readyState===1) ws.send(JSON.stringify({t:'coins', n: store.coins}));
+  }
+  function addCoins(n){ store.coins = Math.min(100000000, (store.coins||0) + n); saveStore(store); refreshCoinUI(); reportCoins(); if(store.coins>=50000) awardTrophy('loaded'); }
   function refreshCoinUI(){
     document.getElementById('coinAmt').textContent = store.coins;
+    const cb=document.getElementById('coinBar');
+    if(cb){ cb.classList.remove('bump'); void cb.offsetWidth; cb.classList.add('bump'); }
     const sc=document.getElementById('shopCoins'); if(sc) sc.textContent=store.coins;
     const kc=document.getElementById('skinCoins'); if(kc) kc.textContent=store.coins;
     const cc=document.getElementById('cheatCoins'); if(cc) cc.textContent=store.coins;
@@ -646,7 +811,7 @@
     boostState = 'idle'; boostStart = 0;
     activeMode = selectedMode;
     ws.onopen = () => { connected = true; statusEl.textContent='joining…';
-      ws.send(JSON.stringify({t:'join', name, loadout: store.equip, skin: store.skin, mode: selectedMode})); };
+      ws.send(JSON.stringify({t:'join', name, loadout: store.equip, skin: store.skin, mode: selectedMode, coins: store.coins})); };
     ws.onclose = () => { connected = false; statusEl.textContent='disconnected — refresh to reconnect'; };
     ws.onerror = () => { statusEl.textContent='connection error'; };
     ws.onmessage = (ev) => {
@@ -661,7 +826,7 @@
         document.getElementById('chatToggle').classList.remove('hidden');
         document.getElementById('boostWrap').classList.toggle('hidden', !hasBoost);
         renderCheatBar();
-        document.getElementById('boardTitle').textContent = activeMode==='br' ? 'Survivors' : 'Leaderboard';
+        document.getElementById('boardTitle').textContent = activeMode==='br' ? 'Survivors' : (activeMode==='teams' ? 'Teams' : 'Leaderboard');
         document.getElementById('myStatLab').textContent = activeMode==='br' ? 'territory · 1 life' : 'your territory';
         lastMyArea = null; lowestPct = 100; Sound.start();
         boostedThisLife=false; cutThisRound=false; machUntil=0; lastKillT=0;
@@ -695,8 +860,9 @@
         if(now < machUntil) awardTrophy('speeddemon');
         // Untouchable/Flawless tracking: a kill doesn't break these; being cut does
       }
-      else if (m.t==='fullmap'){ Sound.win(); const c=Math.round((m.coins||1000)*coinMult); addCoins(c); flashCoins('+'+c+' 100%!'); awardTrophy('conqueror'); }
-      else if (m.t==='chat'){ addChat(m.name, m.color, m.text); }
+      else if (m.t==='fullmap'){ Sound.win(); confetti(); const c=Math.round((m.coins||1000)*coinMult); addCoins(c); flashCoins('+'+c+' 100%!'); awardTrophy('conqueror'); }
+      else if (m.t==='chat'){ addChat(m.name, m.color, m.text); addFeed('💬 <span class="fk" style="color:'+m.color+'">'+escapeHtml(m.name)+'</span> '+escapeHtml(m.text), 3000); }
+      else if (m.t==='feed'){ onFeed(m); }
     };
   }
 
@@ -709,7 +875,8 @@
       seen.add(e.id);
       colorCache[e.id]=e.c;   // remember colors so territory never goes gray
       ents.set(e.id, {x:e.x,y:e.y,h:e.h,color:e.c,name:e.n,area:e.a,outside:e.o,bot:e.b,dead:e.d,
-                      sz:e.sz||1,sk:e.sk||'default',bo:e.bo||0,sh:e.sh||0});
+                      sz:e.sz||1,sk:e.sk||'default',bo:e.bo||0,sh:e.sh||0,
+                      kl:e.kl||0,w:e.w||0,cn:e.cn||0,tm:e.tm||0});
       if (!view.has(e.id)) view.set(e.id, {x:e.x,y:e.y});
     }
     for (const id of [...ents.keys()]) if(!seen.has(id)){ ents.delete(id); view.delete(id); }
@@ -738,8 +905,31 @@
     document.getElementById('stormAlive').textContent='👥 '+brState.alive+' alive';
   }
 
+  function fmtCoins(n){ return n>=1000000 ? (n/1000000).toFixed(1)+'M' : n>=1000 ? (n/1000).toFixed(1)+'k' : ''+n; }
   function updateHud(){
     const total = GW*GH;
+    if (activeMode==='teams'){
+      // group entities into teams; rank teams by shared territory
+      const teams = new Map();
+      for (const [id,e] of ents){
+        const t = e.tm || id;
+        if (!teams.has(t)) teams.set(t, { area:0, color:e.color, members:[] });
+        const g = teams.get(t);
+        g.area = Math.max(g.area, e.area);      // members report the shared blob
+        g.members.push({id,...e});
+      }
+      const ranked = [...teams.values()].sort((a,b)=>b.area-a.area).slice(0,6);
+      boardRows.innerHTML = ranked.map((g,i)=>{
+        const pct=(g.area/total*100).toFixed(2);
+        const mine = g.members.some(m=>m.id===myId) ? ' me':'';
+        const names = g.members.map(m=>escapeHtml(m.name)).join(' + ');
+        const stats = g.members.map(m=>
+          `<span class="tstat">${escapeHtml(m.name)}: ⚔${m.kl} 🏅${m.w} ●${fmtCoins(m.cn)}</span>`).join('');
+        return `<div class="row${mine}"><span class="rank">${i+1}</span><span class="dot" style="background:${g.color}"></span>`+
+               `<span class="nm">${names}</span><span class="pct">${pct}%</span></div>`+
+               `<div class="trow">${stats}</div>`;
+      }).join('');
+    } else {
     const list = [...ents.entries()].map(([id,e])=>({id,...e}))
       .sort((a,b)=>b.area-a.area).slice(0,8);
     boardRows.innerHTML = list.map((e,i)=>{
@@ -748,6 +938,7 @@
       return `<div class="row${me}"><span class="rank">${i+1}</span><span class="dot" style="background:${e.color}"></span>`+
              `<span class="nm">${escapeHtml(e.name)}</span><span class="pct">${pct}%</span></div>`;
     }).join('');
+    }
     const me = ents.get(myId);
     if (me){
       myAreaEl.textContent = (me.area/total*100).toFixed(2)+'%';
@@ -766,6 +957,35 @@
   let machUntil = 0;     // mach-speed active until (for Speed Demon)
   let boostedThisLife = false;  // did I boost this life (for Untouchable)
   let cutThisRound = false;     // was I cut this round (for Flawless)
+  // ---- KILL FEED (also shows chat/emotes briefly) ----
+  function addFeed(html, ms){
+    const wrap=document.getElementById('killFeed'); if(!wrap) return;
+    const d=document.createElement('div'); d.className='feedline'; d.innerHTML=html;
+    wrap.appendChild(d);
+    while(wrap.children.length>5) wrap.removeChild(wrap.firstChild);
+    setTimeout(()=>{ d.style.opacity='0'; }, (ms||4000)-500);
+    setTimeout(()=>{ d.remove(); }, ms||4000);
+  }
+  function onFeed(m){
+    const v='<span class="fk" style="color:'+(m.vc||'#ccc')+'">'+escapeHtml(m.v||'?')+'</span>';
+    if(m.k){
+      const k='<span class="fk" style="color:'+(m.kc||'#ccc')+'">'+escapeHtml(m.k)+'</span>';
+      addFeed('⚔️ '+k+' cut '+v, 4200);
+    } else if(m.reason==='storm'){ addFeed('⛈️ '+v+' was caught in the storm', 4200); }
+    else { addFeed('💥 '+v+' crashed', 4200); }
+  }
+  // ---- CONFETTI (round wins + Victory Royale) ----
+  function confetti(){
+    const EMO=['🎉','🎊','✨','⭐'];
+    for(let i=0;i<36;i++){
+      const sp=document.createElement('span');
+      sp.className='confetti'; sp.textContent=EMO[i%EMO.length];
+      sp.style.left=(Math.random()*100)+'vw';
+      sp.style.animationDelay=(Math.random()*0.5)+'s';
+      document.body.appendChild(sp);
+      setTimeout(()=>sp.remove(), 3200);
+    }
+  }
   function escapeHtml(s){return (''+s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 
   // ---- INPUT (intent only) ----
@@ -784,7 +1004,28 @@
       ws.send(JSON.stringify({t:'boost'})); boostState='active'; boostStart=performance.now(); Sound.boost(); boostedThisLife=true;
       e.preventDefault(); return;
     }
-    if (isDead) return;                       // no steering while spectating
+    // While dead: LEFT/RIGHT cycle who you're spectating.
+    if (isDead){
+      if (e.code==='ArrowLeft'||e.code==='ArrowRight'){
+        const alive=[...ents.entries()].filter(([id,o])=>id!==myId && !o.dead).map(([id])=>id);
+        if (alive.length){
+          let i=alive.indexOf(spectateId); if(i<0)i=0;
+          i=(i+(e.code==='ArrowRight'?1:alive.length-1))%alive.length;
+          spectateId=alive[i];
+          const o=ents.get(spectateId);
+          const lab=document.getElementById('spectateLabel');
+          if(lab&&o) lab.textContent='Spectating '+o.name+'  (◀ ▶ to switch)';
+        }
+        e.preventDefault();
+      }
+      return;
+    }
+    // QUICK-CHAT EMOTES: Z/X/C/V send preset messages.
+    const EMOTES={KeyZ:'gg',KeyX:'nice!',KeyC:'😱',KeyV:'😂'};
+    if (EMOTES[e.code] && connected && ws && ws.readyState===1){
+      ws.send(JSON.stringify({t:'chat', text:EMOTES[e.code]}));
+      e.preventDefault(); return;
+    }
     // 3D chase cam: left/right turn RELATIVE to your heading (like a snake
     // game). Absolute N/S/E/W steering would be disorienting behind the player.
     if (activeMode==='3d'){
@@ -872,7 +1113,7 @@
     isDead=false; spectateId=null;
     deathScreen.classList.add('hidden');
     const c=Math.round((coins||2000)*coinMult); addCoins(c);
-    Sound.win();
+    Sound.win(); confetti();
     const br=document.getElementById('brResult');
     document.getElementById('brPlace').textContent='#1';
     document.getElementById('brHead').textContent='Victory Royale! 👑';
@@ -1016,7 +1257,7 @@
     if (three || !window.THREE) return;
     const canvas = document.getElementById('game3d');
     const renderer = new THREE.WebGLRenderer({ canvas, antialias:true });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio||1, 2));
+    renderer.setPixelRatio(store.lowGfx ? 1 : Math.min(window.devicePixelRatio||1, 2));
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x0f1d1a);
     scene.fog = new THREE.Fog(0x0f1d1a, 50, 150);
@@ -1235,7 +1476,7 @@
       const pulse=0.5+0.5*Math.sin(performance.now()/300);
       ctx.save();
       ctx.strokeStyle='rgba(180,120,255,'+(0.6+0.3*pulse)+')';
-      ctx.lineWidth=3; ctx.shadowColor='#b478ff'; ctx.shadowBlur=14;
+      ctx.lineWidth=3; if(!store.lowGfx){ ctx.shadowColor='#b478ff'; ctx.shadowBlur=14; }
       ctx.strokeRect(sx, sy, sw, sh);
       ctx.restore();
     }
@@ -1439,6 +1680,20 @@
     connect(name);
   };
   nameInput.addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('playBtn').click();});
+  const RAND_NAMES=['MangoBlast','PixelFox','TurboSnail','CaptainZoom','NoodleKing','SirCutsALot','GlowWorm','MegaMuffin','ZippyZebra','RocketRadish','WaffleWizard','NinjaNacho','BoltBunny','CosmicCarl','JellyJet','PeppyPenguin','DizzyDino','SnackAttack','LunaLoop','GigaGoose'];
+  document.getElementById('diceBtn').onclick=()=>{
+    nameInput.value=RAND_NAMES[(Math.random()*RAND_NAMES.length)|0]+((Math.random()*99)|0);
+  };
+  // ---- settings: volume + low graphics (persisted) ----
+  const volSlider=document.getElementById('volSlider');
+  volSlider.value=Math.round((store.volume??1)*100);
+  volSlider.oninput=()=>{ store.volume=volSlider.value/100; saveStore(store); Sound.setVolume(store.volume); };
+  volSlider.onchange=()=>{ Sound.coin(); };
+  const lowChk=document.getElementById('lowGfxChk');
+  lowChk.checked=!!store.lowGfx;
+  lowChk.onchange=()=>{ store.lowGfx=lowChk.checked; saveStore(store);
+    document.body.classList.toggle('lowgfx', store.lowGfx);
+    flashBanner(store.lowGfx?'⚡ Low graphics ON':'✨ Full graphics ON', '#9fb0aa'); };
   nameInput.focus();
 
   // decorative floating paper squares on the menu
@@ -1503,9 +1758,10 @@
   const howModal=document.getElementById('howModal');
   const cheatsModal=document.getElementById('cheatsModal');
   const trophiesModal=document.getElementById('trophiesModal');
-  function closeModals(){ shopModal.classList.add('hidden'); skinsModal.classList.add('hidden'); howModal.classList.add('hidden'); cheatsModal.classList.add('hidden'); trophiesModal.classList.add('hidden'); }
+  const statsModal=document.getElementById('statsModal');
+  function closeModals(){ shopModal.classList.add('hidden'); skinsModal.classList.add('hidden'); howModal.classList.add('hidden'); cheatsModal.classList.add('hidden'); trophiesModal.classList.add('hidden'); statsModal.classList.add('hidden'); }
   document.querySelectorAll('[data-close]').forEach(b=>b.onclick=closeModals);
-  [shopModal,skinsModal,howModal,cheatsModal,trophiesModal].forEach(m=>m.addEventListener('click',e=>{ if(e.target===m) closeModals(); }));
+  [shopModal,skinsModal,howModal,cheatsModal,trophiesModal,statsModal].forEach(m=>m.addEventListener('click',e=>{ if(e.target===m) closeModals(); }));
 
   function renderShop(){
     // self-heal: keep only valid, unique equipped ids within the slot limit
@@ -1584,6 +1840,20 @@
   document.getElementById('howGotIt').onclick=closeModals;
   document.getElementById('cheatsBtn').onclick=()=>{ renderCheats(); cheatsModal.classList.remove('hidden'); };
   document.getElementById('trophiesBtn').onclick=()=>{ renderTrophies(); trophiesModal.classList.remove('hidden'); };
+  document.getElementById('statsBtn').onclick=()=>{ renderStats(); statsModal.classList.remove('hidden'); };
+  function renderStats(){
+    const tro=Object.keys(store.trophies||{}).length;
+    const rows=[
+      ['⚔️','Lifetime kills', store.lifetimeKills||0],
+      ['🎮','Matches played', store.matchesPlayed||0],
+      ['●','Coins right now', store.coins||0],
+      ['💸','Coins spent', store.coinsSpent||0],
+      ['🃏','Cheats used', store.cheatsUsed||0],
+      ['🏆','Trophies', tro+' / '+TROPHIES.length],
+    ];
+    document.getElementById('statsGrid').innerHTML=rows.map(r=>
+      `<div class="item"><div class="ic">${r[0]}</div><div class="nm">${r[2]}</div><div class="ds">${r[1]}</div></div>`).join('');
+  }
 
   function renderTrophies(){
     store.trophies=store.trophies||{};
@@ -1763,6 +2033,7 @@
     const DIRV=[[0,-1],[1,0],[0,1],[-1,0]];
     let raf;
     function step(){
+      if(store.lowGfx){ raf=requestAnimationFrame(step); return; }
       // only animate while the menu is visible
       if(joinScreen.classList.contains('hidden')){ raf=requestAnimationFrame(step); return; }
       cx.clearRect(0,0,W,H);
