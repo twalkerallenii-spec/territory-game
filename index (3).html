@@ -266,6 +266,42 @@
   /* kill feed: centered under the top edge, clear of the leaderboard */
   #killFeed{left:50%;right:auto;top:96px;transform:translateX(-50%);align-items:center;}
 
+  /* CHROMEBOOK LANDSCAPE: two-column menu so nothing scrolls */
+  @media (min-width:1000px) and (orientation:landscape){
+    #joinScreen > div:has(#playBtn){display:grid;grid-template-columns:1.05fr 1fr;
+      column-gap:26px;row-gap:6px;width:min(920px,94vw);max-height:94vh;
+      align-content:center;}
+    #joinScreen > div:has(#playBtn) > *{grid-column:1;}
+    #joinScreen #nameRow{grid-column:1/-1;}
+    #joinScreen .modepick{grid-column:1;grid-row:span 5;margin:4px 0;}
+    #joinScreen .setrow, #joinScreen #tipLine, #joinScreen #playBtn,
+    #joinScreen .menurow{grid-column:2;}
+    #joinScreen #playBtn{margin:2px 0 6px;}
+    #joinScreen > div:has(#playBtn) > h1, #joinScreen > div:has(#playBtn) > .tagline,
+    #joinScreen > div:has(#playBtn) > .logo3d, #joinScreen > div:has(#playBtn) > p{grid-column:1/-1;}
+  }
+  /* MOBILE TOUCH CONTROLS: D-pad + boost. Visibility: Auto (touch screens),
+     or forced by the Mobile/PC toggle. */
+  #padWrap{display:none;position:fixed;left:14px;bottom:14px;z-index:8;opacity:.85;
+    width:170px;height:172px;}
+  #padWrap .pbtn{position:absolute;width:54px;height:54px;border-radius:14px;
+    background:rgba(20,32,28,.8);border:1px solid rgba(255,255,255,.2);color:#fff;
+    font-size:22px;display:flex;align-items:center;justify-content:center;
+    -webkit-user-select:none;user-select:none;touch-action:manipulation;}
+  #padN{left:58px;bottom:116px;} #padS{left:58px;bottom:4px;}
+  #padW{left:2px;bottom:60px;}  #padE{left:114px;bottom:60px;}
+  #boostBtn{display:none;position:fixed;right:16px;bottom:22px;z-index:8;
+    width:74px;height:74px;border-radius:50%;
+    background:linear-gradient(180deg,#ffd23f,#ff9f1c);border:none;font-size:26px;
+    box-shadow:0 8px 22px rgba(255,159,28,.4);opacity:.9;touch-action:manipulation;}
+  @media (pointer:coarse){
+    body.playing:not(.forcepc) #padWrap{display:block;}
+    body.playing:not(.forcepc) #boostBtn{display:block;}
+  }
+  body.forcemobile.playing #padWrap{display:block;}
+  body.forcemobile.playing #boostBtn{display:block;}
+  #ctlModeBtn.ghost{flex:0 0 auto;width:auto;min-width:0;padding:6px 10px;font-size:11px;}
+
   /* teams leaderboard stat sub-rows */
   .trow{display:flex;flex-direction:column;gap:1px;margin:-2px 0 6px 26px;}
   .tstat{font-size:10px;color:#9fb0aa;letter-spacing:.01em;}
@@ -432,6 +468,11 @@
 <canvas id="game3d" class="hidden"></canvas>
 <div id="killFeed"></div>
 <div id="edgeFade"></div>
+<div id="padWrap">
+  <div class="pbtn" id="padN">▲</div><div class="pbtn" id="padW">◀</div>
+  <div class="pbtn" id="padE">▶</div><div class="pbtn" id="padS">▼</div>
+</div>
+<button id="boostBtn">⚡</button>
 
 <div id="hud" class="hidden">
   <div id="mystat" class="card">
@@ -479,7 +520,7 @@
         <span class="L" data-letter="P" style="--d:0">P</span><span class="L" data-letter="A" style="--d:1">A</span><span class="L" data-letter="P2" style="--d:2">P</span><span class="L" data-letter="E" style="--d:3">E</span><span class="L" data-letter="R" style="--d:4">R</span><span class="L io" style="--d:5">io</span>
       </div>
       <div class="sub">Leave home, draw a loop, return to fill it.<br>Cut a rival's trail and steal everything they own. · v1.0</div>
-      <div style="display:flex;gap:8px;align-items:center;">
+      <div id="nameRow" style="display:flex;gap:8px;align-items:center;">
         <input id="nameInput" maxlength="16" placeholder="enter your name" autocomplete="off" style="flex:1;" />
         <button class="ghost" id="diceBtn" title="Random name" style="padding:10px 12px;">🎲</button>
         <button class="ghost" id="ownNameBtn" title="Own this name forever (5,000 coins)" style="padding:10px 12px;">🔒</button>
@@ -518,6 +559,7 @@
         <span>🔊</span>
         <input type="range" id="volSlider" min="0" max="100" step="5" />
         <label class="lowgfx"><input type="checkbox" id="lowGfxChk" /> ⚡ Low graphics</label>
+        <button class="ghost" id="ctlModeBtn" title="Controls: Auto detects touch screens · Mobile forces the on-screen pad · PC hides it">🅰 Auto</button>
       </div>
       <div id="tipLine"></div>
       <button id="playBtn">
@@ -996,6 +1038,7 @@
         hud.classList.remove('hidden'); joinScreen.classList.add('hidden'); closeModals(); statusEl.textContent='';
         if (activeMode==='3d') show3D(); else hide3D();
         document.getElementById('edgeFade').style.opacity='1';
+        document.body.classList.add('playing');
         document.getElementById('chatToggle').classList.remove('hidden');
         document.getElementById('boostWrap').classList.toggle('hidden', !hasBoost);
         renderCheatBar();
@@ -1147,6 +1190,28 @@
   let cutThisRound = false;     // was I cut this round (for Flawless)
   let winStreakLive = 0;        // consecutive round wins this session (🔥 flames)
   let acctMode = false;         // PIN account: the server owns my coin balance
+  // ---- MOBILE TOUCH CONTROLS ----
+  (function pad(){
+    const dirs={padN:'N',padS:'S',padW:'W',padE:'E'};
+    for(const [id,d] of Object.entries(dirs)){
+      const b=document.getElementById(id); if(!b) continue;
+      b.addEventListener('touchstart',ev=>{ ev.preventDefault();
+        if(!connected||isDead||!ws||ws.readyState!==1) return;
+        if(activeMode==='3d'){
+          // chase cam: ◀ ▶ turn relative; ▲ ▼ ignored
+          const me=ents.get(myId);
+          if(me&&me.h&&(d==='W'||d==='E')){
+            ws.send(JSON.stringify({t:'turn',d:HEAD_ORDER[(HEAD_ORDER.indexOf(me.h)+(d==='E'?1:3))%4]}));
+          }
+        } else ws.send(JSON.stringify({t:'turn',d}));
+      },{passive:false});
+    }
+    const bb=document.getElementById('boostBtn');
+    if(bb) bb.addEventListener('touchstart',ev=>{ ev.preventDefault();
+      if(!connected||isDead||!ws||ws.readyState!==1) return;
+      ws.send(JSON.stringify({t:'boost'})); Sound.boost(); boostedThisLife=true;
+    },{passive:false});
+  })();
   // ---- KILL FEED (also shows chat/emotes briefly) ----
   function addFeed(html, ms){
     const wrap=document.getElementById('killFeed'); if(!wrap) return;
@@ -1925,6 +1990,22 @@
   volSlider.value=Math.round((store.volume??1)*100);
   volSlider.oninput=()=>{ store.volume=volSlider.value/100; saveStore(store); Sound.setVolume(store.volume); };
   volSlider.onchange=()=>{ Sound.coin(); };
+  // CONTROL MODE: Auto / Mobile / PC (persisted)
+  store.controlMode = store.controlMode || 'auto';
+  const ctlBtn=document.getElementById('ctlModeBtn');
+  function applyControlMode(){
+    document.body.classList.toggle('forcemobile', store.controlMode==='mobile');
+    document.body.classList.toggle('forcepc', store.controlMode==='pc');
+    ctlBtn.textContent = store.controlMode==='mobile' ? '📱 Mobile'
+                       : store.controlMode==='pc' ? '🖥️ PC' : '🅰 Auto';
+  }
+  ctlBtn.onclick=()=>{
+    store.controlMode = store.controlMode==='auto' ? 'mobile'
+                      : store.controlMode==='mobile' ? 'pc' : 'auto';
+    saveStore(store); applyControlMode();
+    flashBanner(ctlBtn.textContent+' controls', '#9fb0aa');
+  };
+  applyControlMode();
   const lowChk=document.getElementById('lowGfxChk');
   lowChk.checked=!!store.lowGfx;
   lowChk.onchange=()=>{ store.lowGfx=lowChk.checked; saveStore(store);
@@ -1962,6 +2043,7 @@
     document.getElementById('stormHud').classList.add('hidden');
     hide3D();
     document.getElementById('edgeFade').style.opacity='0';
+    document.body.classList.remove('playing');
     acctMode=false;
     brState=null;
     joinScreen.classList.remove('hidden');
