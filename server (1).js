@@ -107,7 +107,7 @@ const OPP = { N: 'S', S: 'N', E: 'W', W: 'E' };
 // game functions read via the module-level bindings above; useRoom(room) swaps
 // the bindings to point at that room before its logic runs, so the existing
 // ~40 functions work unchanged on whichever room is active.
-const VALID_MODES = ['classic', 'br'];   // 'teams' added when team mode ships
+const VALID_MODES = ['classic', 'br', '3d'];   // '3d' = classic rules, 3D-rendered room; 'teams' later
 const rooms = {};   // mode -> Room
 
 function makeRoom(mode) {
@@ -173,7 +173,6 @@ function getRoom(mode) {
   return rooms[m];
 }
 
-let nextId = 1;                       // entity ids (global across rooms is fine)
 let entities = new Map();             // active room's entities; rebound by useRoom()
 
 // Strictly unique color per live entity: pick an unused palette color at random;
@@ -347,8 +346,24 @@ const POWERUPS = {
   guard:  { shieldMs: 2500 },     // shorter shield variant
 };
 
+// Entity IDs are stored in Uint8Array grids, so they MUST stay in 1..255.
+// We recycle the lowest free id rather than an ever-increasing counter — with
+// IDs ever climbing past 255 they'd wrap (e.g. 256 -> 0) and corrupt the grid,
+// which showed up as gray, uncuttable trails after long play sessions.
+function allocId() {
+  const used = new Set();
+  for (const mode of Object.keys(rooms)) {
+    for (const id of rooms[mode].entities.keys()) used.add(id);
+  }
+  for (let i = 1; i <= 255; i++) if (!used.has(i)) return i;
+  return 0;  // 255 entities live at once should never happen (ROOM_CAP per room)
+}
+
 function spawnEntity({ isBot, name, loadout, mode }) {
-  const id = nextId++;
+  const id = allocId();
+  if (id === 0) {  // safety: no free id (shouldn't happen) — refuse to spawn
+    return null;
+  }
   // Bigger starting blob if the "head start" power-up is equipped.
   const lo = sanitizeLoadout(loadout);
   const blob = lo.includes('head') ? POWERUPS.head.startBlob : SPAWN_BLOB;
@@ -359,7 +374,7 @@ function spawnEntity({ isBot, name, loadout, mode }) {
     id, isBot, name: name || (isBot ? nextBotName() : 'Player ' + id),
     color: freeColor(),
     cx, cy, blob,
-    mode: mode === 'br' ? 'br' : 'classic',
+    mode: VALID_MODES.includes(mode) ? mode : 'classic',
     px: cx + 0.5, py: cy + 0.5,        // continuous position (Blueprint Sec 1)
     heading: headingTowardCenter(cx, cy),
     pendingTurn: null,
@@ -714,7 +729,7 @@ function roundReset(winner) {
 // The client has already verified the player owns/paid for the cheat (coins are
 // client-side for now). The server applies the actual world effect so it's real
 // in multiplayer. Validated against this whitelist.
-const CHEAT_IDS = ['god','mach','thief','quake','titan','empire','freeze','phantom','surge','grand'];
+const CHEAT_IDS = ['god','mach','thief','quake','titan','empire','freeze','phantom','grand'];
 
 function largestOtherEntity(selfId) {
   let best = null;
@@ -790,9 +805,6 @@ function applyCheat(e, id) {
     case 'phantom': {                   // your trail invisible to others 12s
       e.phantomUntil = now + 12000;
       return true;
-    }
-    case 'surge': {                     // 3x coins rest of match (client multiplies)
-      return true;                      // effect is applied client-side on rewards
     }
     case 'grand': {                     // "grand" payout cheat — handled client-side
       return true;
@@ -1027,7 +1039,7 @@ function maintainBots() {
   const humansAndBots = entities.size;
   let need = MIN_BOTS - bots;
   while (need-- > 0 && humansAndBots + 1 <= ROOM_CAP) {
-    spawnEntity({ isBot: true, mode: 'classic' });
+    spawnEntity({ isBot: true, mode: activeRoom ? activeRoom.mode : 'classic' });
   }
 }
 
@@ -1104,10 +1116,10 @@ function tickRoom() {
   }
 
   maintainBots();
-  // BANDWIDTH SAVER 3: broadcast at half the simulation rate (~10/s). The client
-  // interpolates between snapshots, so movement still looks smooth.
-  activeRoom._bcCount = (activeRoom._bcCount || 0) + 1;
-  if (activeRoom._bcCount % 2 === 0) broadcastState();
+  // Broadcast every tick (full rate). A half-rate broadcast saved bandwidth but
+  // made trails look stale and cutting feel unresponsive, so it was reverted.
+  // The big safe saving (skipping rooms with no players) remains in tick().
+  broadcastState();
 }
 
 // ---- NETWORKING ------------------------------------------------------------
@@ -1301,6 +1313,7 @@ wss.on('connection', (ws) => {
         return;
       }
       player = spawnEntity({ isBot: false, name: nm || 'Player', loadout: m.loadout, mode });
+      if (!player) { send(ws, { t: 'full' }); return; }   // no free id (very unlikely)
       player.ws = ws;
       player.room = playerRoom;
       player.skin = (typeof m.skin === 'string') ? m.skin.slice(0, 24) : 'default';

@@ -231,10 +231,15 @@
     font-size:20px;border:2px dashed var(--line);}
   .slot.empty{color:#c7bfae;}
   .slot.filled{border-style:solid;border-color:var(--accent);background:rgba(255,90,122,.08);cursor:pointer;}
+  /* 3D mode canvas — same layer as the 2D game canvas */
+  #game3d{position:fixed;inset:0;width:100%;height:100%;display:block;}
+  #game3d.hidden{display:none;}
 </style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 </head>
 <body>
 <canvas id="game"></canvas>
+<canvas id="game3d" class="hidden"></canvas>
 
 <div id="hud" class="hidden">
   <div id="mystat" class="card">
@@ -289,6 +294,9 @@
         </button>
         <button class="modeopt" data-mode="br">
           <span class="mi">👑</span><span class="mt">Battle Royale</span><span class="md">One life · last wins</span>
+        </button>
+        <button class="modeopt" data-mode="3d">
+          <span class="mi">🧊</span><span class="mt">3D</span><span class="md">Chase cam · classic rules</span>
         </button>
       </div>
       <button id="playBtn">
@@ -560,6 +568,11 @@
   function saveStore(s){ try{ localStorage.setItem('territory_save', JSON.stringify(s)); }catch(_){ } }
   let store = loadStore();
   store.coins = store.coins ?? 300;                 // starter coins
+  // Heal corrupted/overflowed balances (e.g. from the old Magnet Surge loop):
+  // anything absurd or non-finite is clamped back to a sane number.
+  if (!Number.isFinite(store.coins) || store.coins > 100000000 || store.coins < 0) {
+    store.coins = 1000000;
+  }
   store.owned = store.owned || {};                  // power-up ids owned
   store.skins = store.skins || {default:true};      // owned skins
   store.equip = store.equip || [];                  // equipped power-ups for next match
@@ -575,7 +588,7 @@
   store.matchesPlayed = store.matchesPlayed || 0;    // total matches joined
   saveStore(store);
 
-  function addCoins(n){ store.coins += n; saveStore(store); refreshCoinUI(); if(store.coins>=50000) awardTrophy('loaded'); }
+  function addCoins(n){ store.coins = Math.min(100000000, (store.coins||0) + n); saveStore(store); refreshCoinUI(); if(store.coins>=50000) awardTrophy('loaded'); }
   function refreshCoinUI(){
     document.getElementById('coinAmt').textContent = store.coins;
     const sc=document.getElementById('shopCoins'); if(sc) sc.textContent=store.coins;
@@ -644,6 +657,7 @@
         blocked = m.blocked ? rleDecode(m.blocked, GW*GH) : null;
         mapOutline = m.outline || null;
         hud.classList.remove('hidden'); joinScreen.classList.add('hidden'); closeModals(); statusEl.textContent='';
+        if (activeMode==='3d') show3D(); else hide3D();
         document.getElementById('chatToggle').classList.remove('hidden');
         document.getElementById('boostWrap').classList.toggle('hidden', !hasBoost);
         renderCheatBar();
@@ -699,6 +713,7 @@
       if (!view.has(e.id)) view.set(e.id, {x:e.x,y:e.y});
     }
     for (const id of [...ents.keys()]) if(!seen.has(id)){ ents.delete(id); view.delete(id); }
+    stateDirty3D = true;
     brState = m.br || null;
     updateHud();
     updateBoostMeter();
@@ -770,6 +785,22 @@
       e.preventDefault(); return;
     }
     if (isDead) return;                       // no steering while spectating
+    // 3D chase cam: left/right turn RELATIVE to your heading (like a snake
+    // game). Absolute N/S/E/W steering would be disorienting behind the player.
+    if (activeMode==='3d'){
+      let rel = null;
+      if (e.code==='ArrowLeft'||e.code==='KeyA') rel = 3;        // turn left
+      else if (e.code==='ArrowRight'||e.code==='KeyD') rel = 1;  // turn right
+      if (rel!==null){
+        const me = ents.get(myId);
+        if (me && me.h && connected && ws && ws.readyState===1){
+          const d = HEAD_ORDER[(HEAD_ORDER.indexOf(me.h)+rel)%4];
+          ws.send(JSON.stringify({t:'turn', d}));
+        }
+        e.preventDefault();
+      }
+      return;                                 // up/down do nothing in 3D
+    }
     const d = KEYMAP[e.code];
     if (d && connected && ws && ws.readyState===1){ ws.send(JSON.stringify({t:'turn', d})); e.preventDefault(); }
   });
@@ -790,8 +821,16 @@
     // throttle so one long drag doesn't spam turns
     const now=performance.now(); if(now-lastSwipeT<90) return; lastSwipeT=now;
     if(!isDead){
-      const d = Math.abs(dx)>Math.abs(dy) ? (dx>0?'E':'W') : (dy>0?'S':'N');
-      sendTurn(d);
+      if(activeMode==='3d'){
+        // 3D: horizontal swipe turns relative to heading; vertical swipes ignored
+        if(Math.abs(dx)>=SWIPE_MIN && Math.abs(dx)>Math.abs(dy)){
+          const me=ents.get(myId);
+          if(me && me.h){ sendTurn(HEAD_ORDER[(HEAD_ORDER.indexOf(me.h)+(dx>0?1:3))%4]); }
+        }
+      } else {
+        const d = Math.abs(dx)>Math.abs(dy) ? (dx>0?'E':'W') : (dy>0?'S':'N');
+        sendTurn(d);
+      }
     }
     // reset origin so the next swipe is measured fresh from here
     tsx=t.clientX; tsy=t.clientY;
@@ -949,6 +988,169 @@
   // ---- RENDER ----
   function lerp(a,b,t){return a+(b-a)*t;}
 
+  // ================= 3D MODE (Three.js chase-cam renderer) =================
+  // Separate '3d' room on the server (classic rules). The 3D view renders the
+  // SAME data the 2D game uses: owner/trail/blocked grids painted onto a ground
+  // texture, entities as colored cubes, and a behind-the-player chase camera.
+  const HEAD_ORDER = ['N','E','S','W'];
+  const HEAD_VEC = { N:[0,-1], S:[0,1], E:[1,0], W:[-1,0] };   // grid dx,dy (matches server DIRS)
+  let three = null;            // lazily-built Three.js state
+  let stateDirty3D = true;     // repaint the ground texture on next 3D frame
+
+  function hexToRgb(h){
+    if (typeof h==='string' && h[0]==='#'){
+      const s = h.length===4 ? h[1]+h[1]+h[2]+h[2]+h[3]+h[3] : h.slice(1,7);
+      const n = parseInt(s,16);
+      if (!Number.isNaN(n)) return [(n>>16)&255,(n>>8)&255,n&255];
+    }
+    return [150,160,160];
+  }
+  const rgbCache = {};
+  function rgbOf(id){
+    const col = colorCache[id] || '#9aa9a9';
+    let c = rgbCache[col]; if(!c){ c = hexToRgb(col); rgbCache[col]=c; }
+    return c;
+  }
+
+  function init3D(){
+    if (three || !window.THREE) return;
+    const canvas = document.getElementById('game3d');
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias:true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio||1, 2));
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0f1d1a);
+    scene.fog = new THREE.Fog(0x0f1d1a, 50, 150);
+    const camera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.1, 400);
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x1c2a26, 0.95));
+    const sun = new THREE.DirectionalLight(0xffffff, 0.6);
+    sun.position.set(60, 90, 30); scene.add(sun);
+    // Ground: one plane, territory painted on a pixel-per-cell texture.
+    const texData = new Uint8Array(GW*GH*4);
+    const tex = new THREE.DataTexture(texData, GW, GH, THREE.RGBAFormat);
+    tex.magFilter = THREE.NearestFilter; tex.minFilter = THREE.NearestFilter;
+    const ground = new THREE.Mesh(
+      new THREE.PlaneGeometry(GW, GH),
+      new THREE.MeshLambertMaterial({ map: tex })
+    );
+    ground.rotation.x = -Math.PI/2;
+    ground.position.set(GW/2, 0, GH/2);       // world (x,z) == grid (x,y)
+    scene.add(ground);
+    three = {
+      renderer, scene, camera, tex, texData,
+      meshes: new Map(),                       // id -> {group, body, sprite}
+      camPos: new THREE.Vector3(GW/2, 40, GH/2),
+      camLook: new THREE.Vector3(GW/2, 0, GH/2),
+      fwd: new THREE.Vector3(0,0,1),
+    };
+    onResize3D();
+    addEventListener('resize', onResize3D);
+  }
+  function onResize3D(){
+    if(!three) return;
+    three.renderer.setSize(innerWidth, innerHeight, false);
+    three.camera.aspect = innerWidth/innerHeight;
+    three.camera.updateProjectionMatrix();
+  }
+  function show3D(){
+    if (!window.THREE){
+      flashBanner('⚠️ 3D engine failed to load — using 2D view', '#ff5a7a');
+      return;                                  // graceful fallback: 2D still renders
+    }
+    init3D();
+    document.getElementById('game3d').classList.remove('hidden');
+    cv.classList.add('hidden');
+  }
+  function hide3D(){
+    document.getElementById('game3d').classList.add('hidden');
+    cv.classList.remove('hidden');
+  }
+
+  // Paint owner/trail/blocked onto the ground texture (texture V is flipped
+  // relative to grid y, hence the GH-1-y row index).
+  function paint3D(){
+    if(!three || !owner) return;
+    const d = three.texData;
+    for(let y=0;y<GH;y++){
+      const row=(GH-1-y)*GW;
+      for(let x=0;x<GW;x++){
+        const i=y*GW+x, ti=(row+x)*4;
+        let r=34,g=56,b=50;                              // neutral ground
+        if(blocked && blocked[i]===1){ r=13; g=21; b=19; }  // void / walls
+        else {
+          const t=trail[i], o=owner[i];
+          if(t!==0){ const c=rgbOf(t); r=(c[0]+255)>>1; g=(c[1]+255)>>1; b=(c[2]+255)>>1; }
+          else if(o!==0){ const c=rgbOf(o); r=(c[0]*3)>>2; g=(c[1]*3)>>2; b=(c[2]*3)>>2; }
+        }
+        d[ti]=r; d[ti+1]=g; d[ti+2]=b; d[ti+3]=255;
+      }
+    }
+    three.tex.needsUpdate = true;
+  }
+
+  function makeNameSprite(name){
+    const c=document.createElement('canvas'); c.width=256; c.height=64;
+    const g=c.getContext('2d');
+    g.fillStyle='rgba(18,28,25,0.78)';
+    g.fillRect(24,10,208,44);
+    g.font='bold 26px ui-monospace, monospace'; g.textAlign='center'; g.textBaseline='middle';
+    g.fillStyle='#f2f6f4';
+    g.fillText(String(name||'?').slice(0,14),128,33);
+    const sp=new THREE.Sprite(new THREE.SpriteMaterial({ map:new THREE.CanvasTexture(c), depthTest:false }));
+    sp.scale.set(5.6,1.4,1); sp.position.y=2.5;
+    return sp;
+  }
+
+  function sync3DEntities(){
+    const seen=new Set();
+    for(const [id,e] of ents){
+      seen.add(id);
+      let m=three.meshes.get(id);
+      if(!m){
+        const group=new THREE.Group();
+        const body=new THREE.Mesh(
+          new THREE.BoxGeometry(0.9,0.9,0.9),
+          new THREE.MeshLambertMaterial({ color:new THREE.Color(e.color||'#cccccc') })
+        );
+        body.position.y=0.45;
+        const sprite=makeNameSprite(e.name);
+        group.add(body); group.add(sprite);
+        three.scene.add(group);
+        m={group,body,sprite};
+        three.meshes.set(id,m);
+      }
+      const v=view.get(id)||e;
+      m.group.position.set(v.x, 0, v.y);
+      const sz=e.sz||1;
+      m.body.scale.setScalar(sz);
+      m.body.position.y=0.45*sz;
+      m.body.material.opacity = e.sh ? 0.55 : 1;         // shield shimmer
+      m.body.material.transparent = !!e.sh;
+    }
+    for(const [id,m] of three.meshes){
+      if(!seen.has(id)){ three.scene.remove(m.group); three.meshes.delete(id); }
+    }
+  }
+
+  function render3D(){
+    if(!three) return;
+    if(stateDirty3D){ paint3D(); stateDirty3D=false; }
+    sync3DEntities();
+    // chase cam: sit behind the player (or whoever we're spectating), look ahead
+    const targetId=(isDead && spectateId!=null)? spectateId : myId;
+    const e=ents.get(targetId), v=view.get(targetId);
+    if(e && v){
+      const hv=HEAD_VEC[e.h]||[0,1];
+      three.fwd.lerp(new THREE.Vector3(hv[0],0,hv[1]),0.09).normalize();
+      const desiredPos=new THREE.Vector3(v.x - three.fwd.x*9, 6.5, v.y - three.fwd.z*9);
+      three.camPos.lerp(desiredPos,0.12);
+      const desiredLook=new THREE.Vector3(v.x + three.fwd.x*4, 1.1, v.y + three.fwd.z*4);
+      three.camLook.lerp(desiredLook,0.2);
+      three.camera.position.copy(three.camPos);
+      three.camera.lookAt(three.camLook);
+    }
+    three.renderer.render(three.scene, three.camera);
+  }
+
   function draw(){
     requestAnimationFrame(draw);
     const W=innerWidth,H=innerHeight;
@@ -965,6 +1167,11 @@
     const tgt = view.get(camTargetId) || view.get(myId);
     if(tgt){ camX=lerp(camX,tgt.x,0.12); camY=lerp(camY,tgt.y,0.12); }
     camX=Math.max(0,Math.min(GW,camX)); camY=Math.max(0,Math.min(GH,camY));
+
+    // 3D mode: hand off to the Three.js chase-cam renderer. HUD, minimap,
+    // leaderboard, and chat are DOM overlays driven by state, so they keep
+    // working unchanged on top of the 3D canvas.
+    if(activeMode==='3d'){ render3D(); return; }
 
     const cs=CELL_SCREEN;
     const ox = W/2 - camX*cs;
@@ -1262,6 +1469,7 @@
     document.getElementById('chatPanel').classList.add('hidden');
     document.getElementById('cheatBar').classList.add('hidden');
     document.getElementById('stormHud').classList.add('hidden');
+    hide3D();
     brState=null;
     joinScreen.classList.remove('hidden');
     statusEl.textContent='';
