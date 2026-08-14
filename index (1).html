@@ -244,10 +244,19 @@
   .confetti{position:fixed;top:-6vh;z-index:30;pointer-events:none;font-size:22px;
     animation:confallA 2.4s linear forwards;}
 
-  /* menu top row: name box gets the space; small buttons stay small */
+  /* menu top row: name box gets the space; small buttons get FIXED widths
+     (the base button rule is width:100%, so 'auto' meant 'card-wide') */
   #nameInput{min-width:0;}
-  #diceBtn.ghost,#ownNameBtn.ghost{flex:0 0 auto;min-width:46px;}
-  #pinInput{flex:0 0 76px;min-width:0;}
+  #diceBtn.ghost,#ownNameBtn.ghost{flex:0 0 46px;width:46px;min-width:46px;padding:10px 0;}
+  #pinInput{flex:0 0 76px;width:76px;min-width:0;}
+  /* de-cramp the whole menu: tighter rhythm so everything fits on one screen */
+  #joinScreen .modepick{margin:10px 0 4px;}
+  #joinScreen .setrow{margin:8px 0 0;}
+  #joinScreen #tipLine{margin:6px 0 2px;}
+  #joinScreen #playBtn{padding:12px;margin:6px 0 8px;}
+  #joinScreen button.ghost{padding:9px 10px;font-size:12px;}
+  .modeopt{padding:7px 5px;}
+  .modeopt .md{display:block;}
   /* compact mode cards: 9 modes shouldn't make a skyscraper */
   .modepick{gap:8px;}
   .modeopt{flex:1 1 31%;min-width:92px;padding:9px 6px;gap:2px;}
