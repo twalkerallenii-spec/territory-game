@@ -107,7 +107,7 @@ const OPP = { N: 'S', S: 'N', E: 'W', W: 'E' };
 // game functions read via the module-level bindings above; useRoom(room) swaps
 // the bindings to point at that room before its logic runs, so the existing
 // ~40 functions work unchanged on whichever room is active.
-const VALID_MODES = ['classic', 'br', '3d'];   // '3d' = classic rules, 3D-rendered room; 'teams' later
+const VALID_MODES = ['classic', 'br', '3d', 'teams', 'tron', 'speed', 'tiny', 'bounty', 'chaos'];
 const rooms = {};   // mode -> Room
 
 function makeRoom(mode) {
@@ -158,16 +158,39 @@ function saveActiveRoom() {
   freezeCasterId = room.freezeCasterId;
 }
 
+// Mode-specific terrain applied AFTER the base map shape (tiny = cramped box).
+function applyModeTerrain() {
+  if (!activeRoom || activeRoom.mode !== 'tiny') return;
+  const ins = 50;                              // 60x60 playable micro-arena
+  for (let y = 0; y < GRID_H; y++)
+    for (let x = 0; x < GRID_W; x++)
+      if (x < ins || x >= GRID_W - ins || y < ins || y >= GRID_H - ins) blocked[idx(x, y)] = 1;
+}
+
 function getRoom(mode) {
   const m = VALID_MODES.includes(mode) ? mode : 'classic';
   if (!rooms[m]) {
     const room = makeRoom(m);
     rooms[m] = room;
+    room.speedMult = (m === 'speed') ? 1.6 : 1;
+    room.chaosNextAt = Date.now() + 20000;
+    room.chaosSpeedUntil = 0;
     // initialize this room's world (map shape + bots)
     useRoom(room);
     applyMapShape(MAP_SHAPES[(Math.random() * MAP_SHAPES.length) | 0]);
-    const startBots = (m === 'br') ? BR_START_BOTS : MIN_BOTS;
-    for (let i = 0; i < startBots; i++) spawnEntity({ isBot: true, mode: m });
+    applyModeTerrain();
+    if (m === 'teams') {
+      for (let t = 0; t < 3; t++) {           // 3 bot teams to start
+        const a = spawnEntity({ isBot: true, mode: m });
+        if (!a) break;
+        joinTeam(a, a.id, null);
+        const b = spawnEntity({ isBot: true, mode: m });
+        if (b) joinTeam(b, a.id, a.color);
+      }
+    } else {
+      const startBots = (m === 'br') ? BR_START_BOTS : MIN_BOTS;
+      for (let i = 0; i < startBots; i++) spawnEntity({ isBot: true, mode: m });
+    }
     if (m === 'br') startBrMatch(room);
   }
   return rooms[m];
@@ -269,11 +292,24 @@ function headingTowardCenter(cx, cy) {
   return Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'E' : 'W') : (dy > 0 ? 'S' : 'N');
 }
 
+// ---- TEAMS helpers ---------------------------------------------------------
+// In 'teams' mode a pair shares ONE territory blob. The grid stores a "territory
+// id" — the team anchor's entity id — instead of each member's own id. Outside
+// teams mode tid(e) is just e.id, so classic/BR/3D behavior is unchanged.
+function tid(e) { return e.team || e.id; }
+function teammateOf(e) {
+  if (!e.team) return null;
+  for (const o of entities.values()) if (o.id !== e.id && tid(o) === tid(e)) return o;
+  return null;
+}
+function sameTeam(a, b) { return a && b && a.team && b.team && tid(a) === tid(b); }
+
 function paintSpawnBlob(e) {
+  if (e.mode === 'tron') return;               // Tron: no territory at all
   const B = e.blob || SPAWN_BLOB;
   for (let y = e.cy - B; y <= e.cy + B; y++)
     for (let x = e.cx - B; x <= e.cx + B; x++)
-      if (inBounds(x, y)) owner[idx(x, y)] = e.id;
+      if (inBounds(x, y)) owner[idx(x, y)] = tid(e);
 }
 
 // Exactly 12 fixed bot names (one per bot in the default field).
@@ -306,11 +342,23 @@ const BANNED = ['fuck','shit','bitch','cunt','nigger','nigga','faggot','dick',
   'pussy','asshole','bastard','whore','slut','rape','nazi','penis','vagina',
   'sex','cum','porn','retard','damn','crap'];
 
-function validateName(raw) {
+// Owned-name registry: name -> secret token. Best-effort persistence to disk
+// (survives restarts; wiped by a redeploy — real permanence needs accounts).
+const NAMES_FILE = path.join(__dirname, 'owned-names.json');
+let ownedNames = {};
+try { ownedNames = JSON.parse(fs.readFileSync(NAMES_FILE, 'utf8')) || {}; } catch (_) {}
+function saveOwnedNames() { try { fs.writeFileSync(NAMES_FILE, JSON.stringify(ownedNames)); } catch (_) {} }
+
+function validateName(raw, token) {
   const trimmed = ('' + raw).trim();
   if (trimmed.length < 1) return { ok:false, reason:'empty', message:'Please enter a name.' };
   const norm = normalizeName(trimmed);
   if (norm.length < 1) return { ok:false, reason:'empty', message:'Please enter a real name.' };
+  // owned names: only the owner (matching token) may use them
+  const ownKey = norm.toLowerCase();
+  if (ownedNames[ownKey] && ownedNames[ownKey] !== token) {
+    return { ok:false, reason:'owned', message:'That name is owned by another player. 🔒' };
+  }
   // profanity
   for (const w of BANNED) {
     if (norm.includes(w)) return { ok:false, reason:'inappropriate',
@@ -345,6 +393,51 @@ const POWERUPS = {
   swift:  { turnPrio: true },     // queue turns a touch earlier
   guard:  { shieldMs: 2500 },     // shorter shield variant
 };
+
+// ---- TEAMS: pairing + departure cleanup ------------------------------------
+// Pair a newly-joined human: adopt a waiting solo human if one exists,
+// otherwise spawn a bot partner. Called with the teams room active.
+function joinTeam(member, teamId, color) {
+  // spawnEntity painted the starter blob under member.id BEFORE the team was
+  // known — migrate it onto the team id so no orphaned land is left behind.
+  member.team = teamId;
+  if (member.id !== teamId) transferTerritory(member.id, teamId);
+  if (color) member.color = color;
+  recomputeArea(member);
+}
+function pairIntoTeam(p) {
+  // a solo human = human with no living-or-dead partner entity present
+  for (const o of entities.values()) {
+    if (o.isBot || o.id === p.id) continue;
+    if (o.team && !teammateOf(o)) { joinTeam(p, tid(o), o.color); return; }
+  }
+  // no solo human waiting: anchor a fresh team and spawn a bot partner
+  joinTeam(p, p.id, null);
+  const mate = spawnEntity({ isBot: true, mode: 'teams' });
+  if (mate) joinTeam(mate, p.id, p.color);
+}
+// When a team member leaves the room permanently, the grid must never keep a
+// territory id that allocId() could recycle. Migrate the blob to the survivor
+// or release it, and dissolve bot-only leftovers.
+function teamDepart(p) {
+  if (!p.team) { clearTrail(p); releaseTerritory(p); return; }
+  clearTrail(p);
+  const mate = teammateOf(p);
+  if (!mate) { releaseTerritory(p); return; }
+  if (mate.isBot && !p.isBot) {
+    // human left a human+bot team: dissolve it entirely
+    clearTrail(mate); releaseTerritory(mate); entities.delete(mate.id);
+    return;
+  }
+  // surviving human keeps the land: migrate the blob onto their own id
+  const oldT = tid(p);
+  mate.team = mate.id;
+  if (oldT !== mate.id) transferTerritory(oldT, mate.id);
+  recomputeArea(mate);
+  // give the survivor a fresh bot partner
+  const nb = spawnEntity({ isBot: true, mode: 'teams' });
+  if (nb) joinTeam(nb, mate.id, mate.color);
+}
 
 // Entity IDs are stored in Uint8Array grids, so they MUST stay in 1..255.
 // We recycle the lowest free id rather than an ever-increasing counter — with
@@ -430,8 +523,10 @@ function clearTrail(e) {
 }
 
 function releaseTerritory(e) {
-  // Send all owned land back to neutral.
-  for (let i = 0; i < owner.length; i++) if (owner[i] === e.id) owner[i] = 0;
+  // Send all owned land back to neutral (the whole TEAM blob in teams mode —
+  // callers must only invoke this when the entire team is gone/dead).
+  const t = tid(e);
+  for (let i = 0; i < owner.length; i++) if (owner[i] === t) owner[i] = 0;
 }
 
 function transferTerritory(fromId, toId) {
@@ -441,7 +536,8 @@ function transferTerritory(fromId, toId) {
 
 function recomputeArea(e) {
   let n = 0;
-  for (let i = 0; i < owner.length; i++) if (owner[i] === e.id) n++;
+  const t = tid(e);
+  for (let i = 0; i < owner.length; i++) if (owner[i] === t) n++;
   e.area = n;
 }
 
@@ -462,31 +558,56 @@ function killEntity(e, reason, killer) {
   e.boosting = false;
   e.streak = 0;  // dying resets your own kill streak
 
-  clearTrail(e);
-  const stolen = killer && killer.id !== e.id && !killer.dead;
+  if (e.mode !== 'tron') clearTrail(e);        // Tron walls persist after death
+  if (e.mode === 'tron') e.eliminated = true;  // out until the round resets (server-side only)
+  const stolen = killer && killer.id !== e.id && !killer.dead && !sameTeam(e, killer);
+  const mate = e.team ? teammateOf(e) : null;
+  const mateAlive = !!(mate && !mate.dead);
   let bootToMenu = false;
   if (stolen) {
-    transferTerritory(e.id, killer.id);
+    // Teams: a single cut kills the victim but the TEAM keeps its shared blob as
+    // long as the teammate is still alive. Wipe the whole team -> take it all.
+    if (!e.team || !mateAlive) {
+      transferTerritory(tid(e), tid(killer));
+    }
     recomputeArea(killer);
+    const km = killer.team ? teammateOf(killer) : null;
+    if (km) recomputeArea(km);
     killer.kills = (killer.kills || 0) + 1;
     // kill streak: consecutive kills without dying -> escalating coin multiplier
     killer.streak = (killer.streak || 0) + 1;
     const streakMult = Math.min(5, killer.streak);   // x1..x5
-    const coins = COIN_PER_KILL * streakMult;
+    let coins = COIN_PER_KILL * streakMult;
+    let bounty = false;
+    if (e.mode === 'bounty') {
+      let top = null;
+      for (const o of entities.values()) if (!o.dead || o.id === e.id) { if (!top || o.area > top.area) top = o; }
+      if (top && top.id === e.id) { coins *= 5; bounty = true; }
+    }
     if (!killer.isBot && killer.ws && killer.ws.readyState === 1) {
-      send(killer.ws, { t: 'kill', coins, total: killer.kills, streak: killer.streak, mult: streakMult });
+      send(killer.ws, { t: 'kill', coins, total: killer.kills, streak: killer.streak, mult: streakMult, bounty });
     }
     // 3-kills-to-menu (Classic only): if this killer has now cut THIS victim 3+
     // times, the victim is sent back to the main menu.
-    if (e.mode !== 'br' && !e.isBot) {
+    if (e.mode !== 'br' && e.mode !== 'teams' && !e.isBot) {
       e.deathsBy = e.deathsBy || {};
       e.deathsBy[killer.id] = (e.deathsBy[killer.id] || 0) + 1;
       if (e.deathsBy[killer.id] >= 3) bootToMenu = true;
     }
-  } else {
+  } else if (!e.team || !mateAlive) {
     releaseTerritory(e);
   }
-  e.area = 0;
+  // A dead member of a still-standing team keeps reporting the team's area.
+  if (e.team && mateAlive) recomputeArea(e); else e.area = 0;
+
+  // KILL FEED: tell everyone in the room what just happened.
+  {
+    const feed = JSON.stringify({ t: 'feed', reason,
+      v: e.name, vc: e.color,
+      k: (killer && killer.id !== e.id) ? killer.name : null,
+      kc: (killer && killer.id !== e.id) ? killer.color : null });
+    for (const o of entities.values()) if (!o.isBot && o.ws && o.ws.readyState === 1) o.ws.send(feed);
+  }
 
   if (e.mode === 'br') {
     if (e.ws && e.ws.readyState === 1) {
@@ -614,8 +735,9 @@ function captureTerritory(e) {
     if (x < minX) minX = x; if (x > maxX) maxX = x;
     if (y < minY) minY = y; if (y > maxY) maxY = y;
   };
+  const T = tid(e);
   for (let i = 0; i < owner.length; i++) {
-    if (owner[i] === e.id || trail[i] === e.id) {
+    if (owner[i] === T || trail[i] === e.id) {
       expand(i % GRID_W, (i / GRID_W) | 0);
     }
   }
@@ -630,7 +752,7 @@ function captureTerritory(e) {
   for (let y = minY; y <= maxY; y++)
     for (let x = minX; x <= maxX; x++) {
       const i = idx(x, y);
-      if (owner[i] === e.id || trail[i] === e.id) mark[bi(x, y)] = 1;
+      if (owner[i] === T || trail[i] === e.id) mark[bi(x, y)] = 1;
     }
 
   // Flood OUTSIDE inward from the box border through non-barrier cells.
@@ -665,8 +787,8 @@ function captureTerritory(e) {
       const enclosed = mark[bi(x, y)] === 0;
       if (enclosed || trail[i] === e.id) {
         const prev = owner[i];
-        if (prev !== 0 && prev !== e.id) touchedEnemies.add(prev);
-        owner[i] = e.id;
+        if (prev !== 0 && prev !== T) touchedEnemies.add(prev);
+        owner[i] = T;
         trail[i] = 0;
       }
     }
@@ -674,12 +796,14 @@ function captureTerritory(e) {
   e.trailCells.length = 0;
   e.isOutside = false;
   recomputeArea(e);
+  const mateCap = e.team ? teammateOf(e) : null;
+  if (mateCap) recomputeArea(mateCap);
 
   // Enemies who lost land: recompute; zero-territory rule => keep playing
   // (their avatar persists), matching the "release to neutral" fairness choice.
   for (const enemyId of touchedEnemies) {
-    const enemy = entities.get(enemyId);
-    if (enemy) recomputeArea(enemy);
+    // enemyId is a TERRITORY id: recompute every entity whose blob that is.
+    for (const o of entities.values()) if (tid(o) === enemyId) recomputeArea(o);
   }
 
   // ROUND WIN: dominating the map (≈100%) wipes the board and restarts everyone
@@ -690,6 +814,22 @@ function captureTerritory(e) {
   if (e.area >= total * 0.99 && !roundResetting) {
     if (!e.isBot && e.ws && e.ws.readyState === 1) {
       send(e.ws, { t: 'fullmap', coins: COIN_FULL_MAP });
+    }
+    // Teams: the WIN belongs to both members — reward the teammate too and
+    // bump the session win counters used by the teams leaderboard.
+    if (e.mode === 'teams') {
+      const mateW = teammateOf(e);
+      if (mateW && !mateW.isBot && mateW.ws && mateW.ws.readyState === 1) {
+        send(mateW.ws, { t: 'fullmap', coins: COIN_FULL_MAP });
+      }
+      if (activeRoom) {
+        activeRoom.wins = activeRoom.wins || {};
+        for (const member of [e, mateW]) {
+          if (!member) continue;
+          const key = (member.name || '?').toLowerCase();
+          activeRoom.wins[key] = (activeRoom.wins[key] || 0) + 1;
+        }
+      }
     }
     roundReset(e);
   }
@@ -704,6 +844,7 @@ function roundReset(winner) {
   // pick a new random map shape for the next round
   const shape = MAP_SHAPES[(Math.random() * MAP_SHAPES.length) | 0];
   applyMapShape(shape);
+  applyModeTerrain();
   const winnerName = winner ? winner.name : 'Someone';
   for (const ent of entities.values()) {
     ent.trailCells.length = 0;
@@ -733,8 +874,9 @@ const CHEAT_IDS = ['god','mach','thief','quake','titan','empire','freeze','phant
 
 function largestOtherEntity(selfId) {
   let best = null;
+  const self = entities.get(selfId);
   for (const e of entities.values()) {
-    if (e.id === selfId || e.dead) continue;
+    if (e.id === selfId || e.dead || (self && sameTeam(e, self))) continue;
     if (!best || e.area > best.area) best = e;
   }
   return best;
@@ -774,11 +916,12 @@ function applyCheat(e, id) {
     }
     case 'quake': {                     // everyone else loses trail + 15% land
       for (const o of entities.values()) {
-        if (o.id === e.id || o.dead) continue;
+        if (o.id === e.id || o.dead || sameTeam(o, e)) continue;
         clearTrail(o);
         let drop = Math.floor(o.area * 0.15), done = 0;
+        const oT = tid(o);
         for (let i = 0; i < owner.length && done < drop; i++) {
-          if (owner[i] === o.id) { owner[i] = 0; done++; }
+          if (owner[i] === oT) { owner[i] = 0; done++; }
         }
         recomputeArea(o);
       }
@@ -793,7 +936,7 @@ function applyCheat(e, id) {
       const R = 12;
       for (let y = e.cy - R; y <= e.cy + R; y++)
         for (let x = e.cx - R; x <= e.cx + R; x++)
-          if (inBounds(x, y)) owner[idx(x, y)] = e.id;
+          if (inBounds(x, y)) owner[idx(x, y)] = tid(e);
       recomputeArea(e);
       return true;
     }
@@ -820,11 +963,21 @@ function enterCell(e, x, y) {
   if (!inBounds(x, y)) { return; }   // wall is handled in advance() (slide, no death)
   const i = idx(x, y);
 
+  // TRON: the rules invert — running into ANY trail (yours or theirs) kills
+  // YOU, and trails never disappear. Last lightcycle alive wins the round.
+  if (e.mode === 'tron') {
+    if (trail[i] !== 0) { killEntity(e, 'wall'); return; }
+    e.cx = x; e.cy = y;
+    trail[i] = e.id;
+    e.trailCells.push(i);
+    return;
+  }
   // Stepping onto ANY active trail kills that trail's owner (RULE 1 & 2).
+  // Teams exception: a TEAMMATE's trail is harmless — walk straight through it.
   const tOwner = trail[i];
   if (tOwner !== 0) {
     const victim = entities.get(tOwner);
-    if (victim) {
+    if (victim && !(victim.id !== e.id && sameTeam(victim, e))) {
       if (victim.id === e.id) {
         killEntity(victim, 'self');          // self-cut: territory to neutral
       } else {
@@ -836,7 +989,7 @@ function enterCell(e, x, y) {
 
   e.cx = x; e.cy = y;
 
-  if (owner[i] === e.id) {
+  if (owner[i] === tid(e)) {
     // Back home: close the loop.
     if (e.isOutside && e.trailCells.length > 0) {
       captureTerritory(e);
@@ -860,6 +1013,10 @@ function advance(e) {
   // boost or cheat speed; cheat mach-speed (3x) overrides normal boost
   let mult = e.boosting ? BOOST_MULT : 1;
   if (e.cheatSpeedUntil && Date.now() < e.cheatSpeedUntil) mult = Math.max(mult, e.cheatSpeed || 3);
+  if (activeRoom) {
+    mult *= (activeRoom.speedMult || 1);                                  // Speed mode
+    if (Date.now() < (activeRoom.chaosSpeedUntil || 0)) mult *= 1.8;      // Chaos surge
+  }
   let remaining = CELL_PER_TICK * mult;
   // fractional position within the current cell, measured along heading
   e._frac = (e._frac || 0);
@@ -918,8 +1075,14 @@ function advance(e) {
 function cellSafeForBot(e, x, y) {
   if (!inBounds(x, y)) return false;
   const i = idx(x, y);
+  if (e.mode === 'tron') return trail[i] === 0; // Tron: EVERY trail is a wall
   if (trail[i] === e.id) return false;          // our own trail = death
   return true;
+}
+function isTeammateTrail(e, cellTrailId) {
+  if (cellTrailId === 0 || cellTrailId === e.id) return false;
+  const o = entities.get(cellTrailId);
+  return !!(o && sameTeam(o, e));
 }
 
 function nearestEnemyTrailDir(e, range) {
@@ -931,7 +1094,7 @@ function nearestEnemyTrailDir(e, range) {
       const x = e.cx + dx, y = e.cy + dy;
       if (!inBounds(x, y)) continue;
       const t = trail[idx(x, y)];
-      if (t !== 0 && t !== e.id) {
+      if (t !== 0 && t !== e.id && !isTeammateTrail(e, t)) {
         const d = Math.abs(dx) + Math.abs(dy);
         if (d > 0 && d < best) {
           best = d;
@@ -950,11 +1113,12 @@ function dirTowardOwnLand(e) {
   for (const d of cands) {
     const [tx, ty] = DIRS[d];
     const nx = e.cx + tx, ny = e.cy + ty;
-    if (cellSafeForBot(e, nx, ny) && inBounds(nx, ny) && owner[idx(nx, ny)] === e.id) return d;
+    if (cellSafeForBot(e, nx, ny) && inBounds(nx, ny) && owner[idx(nx, ny)] === tid(e)) return d;
   }
   // otherwise: head toward our territory's centroid
   let sx = 0, sy = 0, n = 0;
-  for (let i = 0; i < owner.length; i++) if (owner[i] === e.id) { sx += i % GRID_W; sy += (i / GRID_W) | 0; n++; }
+  const Tn = tid(e);
+  for (let i = 0; i < owner.length; i++) if (owner[i] === Tn) { sx += i % GRID_W; sy += (i / GRID_W) | 0; n++; }
   if (n > 0) {
     const cx = sx / n, cy = sy / n;
     const ddx = cx - e.cx, ddy = cy - e.cy;
@@ -1034,6 +1198,27 @@ function maintainBots() {
   // Battle Royale is last-one-standing: bots must NOT refill, so the field
   // shrinks to a single winner. Only Classic keeps topping up its bot count.
   if (activeRoom && activeRoom.mode === 'br') return;
+  if (activeRoom && activeRoom.mode === 'teams') {
+    // Every human must have a partner (replace a lost bot mate)...
+    for (const e of [...entities.values()]) {
+      if (!e.isBot && e.team && !teammateOf(e) && entities.size + 1 <= ROOM_CAP) {
+        const nb = spawnEntity({ isBot: true, mode: 'teams' });
+        if (nb) joinTeam(nb, tid(e), e.color);
+      }
+    }
+    // ...and keep at least 3 full BOT teams as rivals.
+    const anchors = new Set();
+    for (const e of entities.values()) if (e.isBot && e.team && !([...entities.values()].some(o => tid(o) === tid(e) && !o.isBot))) anchors.add(tid(e));
+    let needTeams = 3 - anchors.size;
+    while (needTeams-- > 0 && entities.size + 2 <= ROOM_CAP) {
+      const a = spawnEntity({ isBot: true, mode: 'teams' });
+      if (!a) break;
+      joinTeam(a, a.id, null);
+      const b = spawnEntity({ isBot: true, mode: 'teams' });
+      if (b) joinTeam(b, a.id, a.color);
+    }
+    return;
+  }
   const alive = [...entities.values()].filter(e => !e.dead);
   const bots = alive.filter(e => e.isBot).length;
   const humansAndBots = entities.size;
@@ -1085,7 +1270,7 @@ function tickRoom() {
   // battle-royale entities. Humans respawn on Space (classic only).
   for (const e of entities.values()) {
     if (e.dead && e.isBot && !e.eliminated && now >= e.respawnAt) {
-      if (entities.size > ROOM_CAP) { entities.delete(e.id); continue; }
+      if (entities.size > ROOM_CAP) { teamDepart(e); entities.delete(e.id); continue; }
       respawnEntity(e);
     }
     // remove eliminated bots so the world stays populated with fresh ones
@@ -1113,6 +1298,48 @@ function tickRoom() {
       }
     }
     checkBrWin();
+  }
+
+  // TRON: last one alive wins the round; then wipe the arena and relaunch.
+  if (activeRoom && activeRoom.mode === 'tron' && !roundResetting) {
+    const aliveT = [...entities.values()].filter(e => !e.dead);
+    if (entities.size >= 2 && aliveT.length <= 1) {
+      const winT = aliveT[0] || null;
+      const msg = JSON.stringify({ t: 'tronwin', winner: winT ? winT.name : 'Nobody',
+                                   winnerId: winT ? winT.id : 0, coins: 800 });
+      for (const o of entities.values()) if (!o.isBot && o.ws && o.ws.readyState === 1) o.ws.send(msg);
+      owner.fill(0); trail.fill(0);
+      currentMap.fn(); applyModeTerrain();
+      for (const o of entities.values()) {
+        o.dead = false; o.eliminated = false; o.trailCells = [];
+        const sp = findSpawn(o.id, 1);
+        o.cx = sp.cx; o.cy = sp.cy; o.px = sp.cx; o.py = sp.cy; o._frac = 0;
+        o.heading = headingTowardCenter(o.cx, o.cy);
+      }
+    }
+  }
+  // CHAOS: a random global event every 20-35 seconds.
+  if (activeRoom && activeRoom.mode === 'chaos' && now >= activeRoom.chaosNextAt) {
+    activeRoom.chaosNextAt = now + 20000 + Math.random() * 15000;
+    const pick = (Math.random() * 3) | 0;
+    let label = '';
+    if (pick === 0) { freezeUntil = now + 1500; activeRoom.freezeUntil = freezeUntil; freezeCasterId = 0; activeRoom.freezeCasterId = 0; label = '🧊 GLOBAL FREEZE'; }
+    else if (pick === 1) { for (const o of entities.values()) if (!o.dead) clearTrail(o); label = '🌀 ALL TRAILS WIPED'; }
+    else { activeRoom.chaosSpeedUntil = now + 8000; label = '🚀 SPEED SURGE'; }
+    const cmsg = JSON.stringify({ t: 'chaosevent', label });
+    for (const o of entities.values()) if (!o.isBot && o.ws && o.ws.readyState === 1) o.ws.send(cmsg);
+  }
+
+  // AFK PROTECTION: humans idle for 2+ minutes get booted to the menu. Their
+  // socket is closed, which runs the normal departure cleanup (teams included),
+  // so idle players stop squatting land and burning bandwidth.
+  const AFK_MS = 120000;
+  for (const e of [...entities.values()]) {
+    if (e.isBot || !e.ws || e.ws.readyState !== 1) continue;
+    if (e.lastInput && now - e.lastInput > AFK_MS) {
+      send(e.ws, { t: 'booted', by: 'being idle (AFK)' });
+      try { e.ws.close(); } catch (_) {}
+    }
   }
 
   maintainBots();
@@ -1152,6 +1379,10 @@ function broadcastState() {
       x: +e.px.toFixed(1), y: +e.py.toFixed(1), h: e.heading,
       o: e.isOutside ? 1 : 0, a: e.area, d: 0,
       k: e.killerId || 0,
+      kl: e.kills || 0,
+      w: (activeRoom && activeRoom.wins && activeRoom.wins[(e.name || '?').toLowerCase()]) || 0,
+      cn: e.isBot ? (250 + (e.kills || 0) * 150) : (e.coins || 0),
+      tm: e.team || 0,
       sz: (e.cheatSizeUntil && Date.now() < e.cheatSizeUntil ? (e.cheatSize||3) : (e.sizeMult || 1)),
       sk: e.skin || 'default',
       bo: e.boosting ? 1 : 0, sh: (e.shieldUntil && Date.now() < e.shieldUntil) ? 1 : 0,
@@ -1293,6 +1524,22 @@ wss.on('connection', (ws) => {
   let playerRoom = null;
 
   ws.on('message', (raw) => {
+    // Name purchase works even before joining a game.
+    try {
+      const peek = JSON.parse(raw);
+      if (peek && peek.t === 'buyname') {
+        const nm = ('' + (peek.name || '')).trim().slice(0, 16);
+        const tok = ('' + (peek.token || '')).slice(0, 64);
+        const key = normalizeName(nm).toLowerCase();
+        if (!key || !tok) { send(ws, { t: 'buynameResult', ok: false, reason: 'bad' }); return; }
+        if (ownedNames[key] && ownedNames[key] !== tok) {
+          send(ws, { t: 'buynameResult', ok: false, reason: 'taken' }); return;
+        }
+        ownedNames[key] = tok; saveOwnedNames();
+        send(ws, { t: 'buynameResult', ok: true, name: nm });
+        return;
+      }
+    } catch (_) { return; }
     let m;
     try { m = JSON.parse(raw); } catch (_) { return; }
 
@@ -1307,7 +1554,7 @@ wss.on('connection', (ws) => {
         return;
       }
       const nm = ('' + (m.name || 'Player')).slice(0, 16).trim();
-      const verdict = validateName(nm);
+      const verdict = validateName(nm, typeof m.nameToken === 'string' ? m.nameToken.slice(0, 64) : null);
       if (!verdict.ok) {
         send(ws, { t: 'nameReject', reason: verdict.reason, message: verdict.message });
         return;
@@ -1317,6 +1564,12 @@ wss.on('connection', (ws) => {
       player.ws = ws;
       player.room = playerRoom;
       player.skin = (typeof m.skin === 'string') ? m.skin.slice(0, 24) : 'default';
+      if (mode === 'teams') pairIntoTeam(player);
+      player.lastInput = Date.now();
+      // client-reported coin balance for the teams leaderboard (self-reported;
+      // clamped to sane bounds — see honesty note: no accounts yet)
+      const cn = Number(m.coins);
+      player.coins = Number.isFinite(cn) ? Math.max(0, Math.min(100000000, cn)) : 0;
       send(ws, { t: 'welcome', id: player.id, w: GRID_W, h: GRID_H, loadout: player.loadout,
                  boostMs: BOOST_DURATION_MS, cooldownMs: BOOST_COOLDOWN_MS, mode: player.mode,
                  mapId: currentMap.id, mapName: currentMap.name, blocked: rleEncode(blocked),
@@ -1326,6 +1579,12 @@ wss.on('connection', (ws) => {
 
     // all other messages operate within the player's room
     if (!player || !playerRoom) return;
+    player.lastInput = Date.now();
+    if (m.t === 'coins') {
+      const n = Number(m.n);
+      if (Number.isFinite(n)) player.coins = Math.max(0, Math.min(100000000, n));
+      return;
+    }
     useRoom(playerRoom);
 
     if (m.t === 'turn' && !player.dead) {
@@ -1342,8 +1601,12 @@ wss.on('connection', (ws) => {
         send(ws, { t: 'cheatResult', id: m.id, ok });
       }
     } else if (m.t === 'respawn' && player.dead) {
-      if (!player.eliminated) respawnEntity(player);
+      // Tron: no mid-round respawns — you're out until the round resets.
+      if (!player.eliminated && player.mode !== 'tron') respawnEntity(player);
     } else if (m.t === 'chat') {
+      const nowC = Date.now();
+      if (player.lastChatAt && nowC - player.lastChatAt < 600) return;
+      player.lastChatAt = nowC;
       const text = ('' + (m.text || '')).slice(0, 120).trim();
       if (text) {
         const out = JSON.stringify({ t: 'chat', name: player.name, color: player.color, text });
@@ -1356,7 +1619,7 @@ wss.on('connection', (ws) => {
   ws.on('close', () => {
     if (player && playerRoom) {
       useRoom(playerRoom);
-      clearTrail(player); releaseTerritory(player); entities.delete(player.id);
+      teamDepart(player); entities.delete(player.id);
     }
   });
 });
