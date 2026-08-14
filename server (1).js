@@ -160,8 +160,8 @@ function saveActiveRoom() {
 
 // Mode-specific terrain applied AFTER the base map shape (tiny = cramped box).
 function applyModeTerrain() {
-  if (!activeRoom || activeRoom.mode !== 'tiny') return;
-  const ins = 50;                              // 60x60 playable micro-arena
+  if (!activeRoom || (activeRoom.mode !== 'tiny' && activeRoom.mode !== 'tron')) return;
+  const ins = activeRoom.mode === 'tiny' ? 50 : 40;   // tiny 60x60, tron 80x80
   for (let y = 0; y < GRID_H; y++)
     for (let x = 0; x < GRID_W; x++)
       if (x < ins || x >= GRID_W - ins || y < ins || y >= GRID_H - ins) blocked[idx(x, y)] = 1;
