@@ -344,6 +344,29 @@ const BANNED = ['fuck','shit','bitch','cunt','nigger','nigga','faggot','dick',
 
 // Owned-name registry: name -> secret token. Best-effort persistence to disk
 // (survives restarts; wiped by a redeploy — real permanence needs accounts).
+const ACCTS_FILE = path.join(__dirname, 'accounts.json');
+let accounts = {};
+try { accounts = JSON.parse(fs.readFileSync(ACCTS_FILE, 'utf8')) || {}; } catch (_) {}
+let acctSaveTimer = null;
+function saveAccounts() {           // throttled write
+  if (acctSaveTimer) return;
+  acctSaveTimer = setTimeout(() => { acctSaveTimer = null;
+    try { fs.writeFileSync(ACCTS_FILE, JSON.stringify(accounts)); } catch (_) {} }, 500);
+}
+function pinHash(pin) {             // lightweight salted hash (not bank-grade; good enough here)
+  let h = 5381; const str = 'papersalt:' + pin;
+  for (let i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) >>> 0;
+  return h.toString(36);
+}
+const CHEAT_PRICES = { god:10000, mach:8000, thief:7000, quake:6000, titan:5000,
+                       empire:4500, freeze:3800, phantom:3200, grand:2000 };
+function acctOf(p) { return p && p.account ? accounts[p.account] : null; }
+function creditAcct(p, n) {         // server-side coin earn + push the new balance
+  const a = acctOf(p); if (!a) return;
+  a.coins = Math.min(100000000, (a.coins || 0) + n); saveAccounts();
+  if (p.ws && p.ws.readyState === 1) send(p.ws, { t: 'acctsync', coins: a.coins, cheats: a.cheats });
+}
+
 const NAMES_FILE = path.join(__dirname, 'owned-names.json');
 let ownedNames = {};
 try { ownedNames = JSON.parse(fs.readFileSync(NAMES_FILE, 'utf8')) || {}; } catch (_) {}
@@ -553,7 +576,10 @@ function killEntity(e, reason, killer) {
 
   e.dead = true;
   if (e.mode === 'br') e.eliminated = true;
-  e.respawnAt = Date.now() + (e.isBot ? BOT_RESPAWN_MS : PLAYER_MIN_DEAD_MS);
+  // Teams: a dead bot leaves its partner alone and its team off the board, so
+  // teams bots come back fast (Classic instead refills with brand-new bots).
+  e.respawnAt = Date.now() + (e.isBot ? (e.mode === 'teams' ? 4000 : BOT_RESPAWN_MS)
+                                      : PLAYER_MIN_DEAD_MS);
   e.killerId = (killer && killer.id !== e.id) ? killer.id : 0;
   e.boosting = false;
   e.streak = 0;  // dying resets your own kill streak
@@ -587,6 +613,7 @@ function killEntity(e, reason, killer) {
     if (!killer.isBot && killer.ws && killer.ws.readyState === 1) {
       send(killer.ws, { t: 'kill', coins, total: killer.kills, streak: killer.streak, mult: streakMult, bounty });
     }
+    const ka = acctOf(killer); if (ka) { ka.kills = (ka.kills || 0) + 1; creditAcct(killer, coins); }
     // 3-kills-to-menu (Classic only): if this killer has now cut THIS victim 3+
     // times, the victim is sent back to the main menu.
     if (e.mode !== 'br' && e.mode !== 'teams' && !e.isBot) {
@@ -815,6 +842,7 @@ function captureTerritory(e) {
     if (!e.isBot && e.ws && e.ws.readyState === 1) {
       send(e.ws, { t: 'fullmap', coins: COIN_FULL_MAP });
     }
+    const wa = acctOf(e); if (wa) { wa.wins = (wa.wins || 0) + 1; creditAcct(e, COIN_FULL_MAP); }
     // Teams: the WIN belongs to both members — reward the teammate too and
     // bump the session win counters used by the teams leaderboard.
     if (e.mode === 'teams') {
@@ -1228,6 +1256,19 @@ function maintainBots() {
   }
 }
 
+function findTeamSpawn(teamId) {
+  // sample the team's owned cells; try to place a small clear pocket beside one
+  const cells = [];
+  for (let i = 0; i < owner.length; i += 3) if (owner[i] === teamId) cells.push(i);
+  for (let tries = 0; tries < 40 && cells.length; tries++) {
+    const i = cells[(Math.random() * cells.length) | 0];
+    const cx = (i % GRID_W) + ((Math.random() * 7) | 0) - 3;
+    const cy = ((i / GRID_W) | 0) + ((Math.random() * 7) | 0) - 3;
+    if (cx > 2 && cy > 2 && cx < GRID_W - 3 && cy < GRID_H - 3 &&
+        inBounds(cx, cy) && blobNeutral(cx, cy, 1, 1)) return { cx, cy };
+  }
+  return null;
+}
 function respawnEntity(e) {
   const { cx, cy } = findSpawn(e.id, e.blob);
   e.cx = cx; e.cy = cy; e.px = cx + 0.5; e.py = cy + 0.5;
@@ -1381,7 +1422,8 @@ function broadcastState() {
       k: e.killerId || 0,
       kl: e.kills || 0,
       w: (activeRoom && activeRoom.wins && activeRoom.wins[(e.name || '?').toLowerCase()]) || 0,
-      cn: e.isBot ? (250 + (e.kills || 0) * 150) : (e.coins || 0),
+      cn: e.isBot ? (250 + (e.kills || 0) * 150)
+        : (e.account && accounts[e.account]) ? accounts[e.account].coins : (e.coins || 0),
       tm: e.team || 0,
       sz: (e.cheatSizeUntil && Date.now() < e.cheatSizeUntil ? (e.cheatSize||3) : (e.sizeMult || 1)),
       sk: e.skin || 'default',
@@ -1428,6 +1470,7 @@ function send(ws, obj) { try { ws.send(JSON.stringify(obj)); } catch (_) {} }
 
 // ---- HTTP (serves the client) + WS -----------------------------------------
 const server = http.createServer((req, res) => {
+  if (req.url === '/favicon.ico') { res.writeHead(204); return res.end(); }
   let p = req.url === '/' ? '/index.html' : req.url.split('?')[0];
   const file = path.join(__dirname, p);
   if (!file.startsWith(__dirname)) { res.writeHead(403); return res.end(); }
@@ -1566,6 +1609,25 @@ wss.on('connection', (ws) => {
       player.skin = (typeof m.skin === 'string') ? m.skin.slice(0, 24) : 'default';
       if (mode === 'teams') pairIntoTeam(player);
       player.lastInput = Date.now();
+      // ACCOUNTS: a PIN turns this name into a server-side account.
+      const pin = ('' + (m.pin || '')).trim();
+      if (/^[0-9]{4,8}$/.test(pin)) {
+        const key = normalizeName(nm || 'Player').toLowerCase();
+        const hp = pinHash(pin);
+        if (accounts[key] && accounts[key].pin !== hp) {
+          send(ws, { t: 'nameReject', reason: 'pin', message: 'Wrong PIN for this account. 🔑' });
+          teamDepart(player); entities.delete(player.id); player = null; return;
+        }
+        if (!accounts[key]) {
+          accounts[key] = { pin: hp, coins: 3000, kills: 0, wins: 0, cheats: {}, lastDaily: '' };
+        }
+        player.account = key;
+        const a = accounts[key];
+        const today = new Date().toDateString();
+        if (a.lastDaily !== today) { a.lastDaily = today; a.coins = Math.min(100000000, a.coins + 500); }
+        saveAccounts();
+        send(ws, { t: 'acct', coins: a.coins, kills: a.kills, wins: a.wins, cheats: a.cheats });
+      }
       // client-reported coin balance for the teams leaderboard (self-reported;
       // clamped to sane bounds — see honesty note: no accounts yet)
       const cn = Number(m.coins);
@@ -1580,7 +1642,16 @@ wss.on('connection', (ws) => {
     // all other messages operate within the player's room
     if (!player || !playerRoom) return;
     player.lastInput = Date.now();
+    if (m.t === 'buycheat') {
+      const a = acctOf(player); const cost = CHEAT_PRICES[m.id];
+      if (!a || !cost) { send(ws, { t: 'buycheatResult', ok: false }); return; }
+      if ((a.coins || 0) < cost) { send(ws, { t: 'buycheatResult', ok: false, reason: 'poor', coins: a.coins }); return; }
+      a.coins -= cost; a.cheats[m.id] = (a.cheats[m.id] || 0) + 1; saveAccounts();
+      send(ws, { t: 'buycheatResult', ok: true, id: m.id, coins: a.coins, cheats: a.cheats });
+      return;
+    }
     if (m.t === 'coins') {
+      if (player.account) return;                  // server owns account balances
       const n = Number(m.n);
       if (Number.isFinite(n)) player.coins = Math.max(0, Math.min(100000000, n));
       return;
@@ -1597,6 +1668,14 @@ wss.on('connection', (ws) => {
       }
     } else if (m.t === 'cheat' && !player.dead) {
       if (CHEAT_IDS.includes(m.id)) {
+        const a = acctOf(player);
+        if (a) {                                   // server-enforced inventory
+          if (!a.cheats[m.id] || a.cheats[m.id] <= 0) {
+            send(ws, { t: 'cheatResult', id: m.id, ok: false, reason: 'notowned' });
+            return;
+          }
+          a.cheats[m.id]--; saveAccounts();
+        }
         const ok = applyCheat(player, m.id);
         send(ws, { t: 'cheatResult', id: m.id, ok });
       }

@@ -244,6 +244,19 @@
   .confetti{position:fixed;top:-6vh;z-index:30;pointer-events:none;font-size:22px;
     animation:confallA 2.4s linear forwards;}
 
+  /* menu top row: name box gets the space; small buttons stay small */
+  #nameInput{min-width:0;}
+  #diceBtn.ghost,#ownNameBtn.ghost{flex:0 0 auto;min-width:46px;}
+  #pinInput{flex:0 0 76px;min-width:0;}
+  /* compact mode cards: 9 modes shouldn't make a skyscraper */
+  .modepick{gap:8px;}
+  .modeopt{flex:1 1 31%;min-width:92px;padding:9px 6px;gap:2px;}
+  .modeopt .mi{font-size:18px;}
+  .modeopt .mt{font-size:12px;}
+  .modeopt .md{font-size:9px;line-height:1.25;}
+  /* kill feed: centered under the top edge, clear of the leaderboard */
+  #killFeed{left:50%;right:auto;top:96px;transform:translateX(-50%);align-items:center;}
+
   /* teams leaderboard stat sub-rows */
   .trow{display:flex;flex-direction:column;gap:1px;margin:-2px 0 6px 26px;}
   .tstat{font-size:10px;color:#9fb0aa;letter-spacing:.01em;}
@@ -461,6 +474,7 @@
         <input id="nameInput" maxlength="16" placeholder="enter your name" autocomplete="off" style="flex:1;" />
         <button class="ghost" id="diceBtn" title="Random name" style="padding:10px 12px;">🎲</button>
         <button class="ghost" id="ownNameBtn" title="Own this name forever (5,000 coins)" style="padding:10px 12px;">🔒</button>
+        <input id="pinInput" maxlength="8" placeholder="PIN" inputmode="numeric" title="Optional 4-8 digit PIN: makes this name a server account (real coins, cheat-proof)" style="width:74px;flex:0 0 auto;" />
       </div>
       <div class="modepick">
         <button class="modeopt active" data-mode="classic">
@@ -839,7 +853,9 @@
     lastCoinReport = now;
     if (connected && ws && ws.readyState===1) ws.send(JSON.stringify({t:'coins', n: store.coins}));
   }
-  function addCoins(n){ store.coins = Math.min(100000000, (store.coins||0) + n); saveStore(store); refreshCoinUI(); reportCoins(); if(store.coins>=50000) awardTrophy('loaded'); }
+  function addCoins(n){
+    if(acctMode){ if(store.coins>=50000) awardTrophy('loaded'); return; }  // server credits accounts
+    store.coins = Math.min(100000000, (store.coins||0) + n); saveStore(store); refreshCoinUI(); reportCoins(); if(store.coins>=50000) awardTrophy('loaded'); }
   function refreshCoinUI(){
     document.getElementById('coinAmt').textContent = store.coins;
     const cb=document.getElementById('coinBar');
@@ -938,13 +954,25 @@
     activeMode = selectedMode;
     ws.onopen = () => { connected = true; statusEl.textContent='joining…';
       ws.send(JSON.stringify({t:'join', name, loadout: store.equip, skin: store.skin, mode: selectedMode, coins: store.coins,
+        pin: (document.getElementById('pinInput').value||'').trim(),
         nameToken: (store.ownedNames||{})[name.trim().toLowerCase()] || null })); };
     ws.onclose = () => { connected = false; statusEl.textContent='disconnected — refresh to reconnect'; };
     ws.onerror = () => { statusEl.textContent='connection error'; };
     ws.onmessage = (ev) => {
       const m = JSON.parse(ev.data);
       if (m.t==='nameReject'){ Sound.reject(); onNameReject(m.message); return; }
-      if (m.t==='welcome'){ myId=m.id; GW=m.w; GH=m.h; activeMode=m.mode||selectedMode;
+      if (m.t==='acct' || m.t==='acctsync'){ acctMode=true;
+        if(typeof m.coins==='number'){ store.coins=m.coins; }
+        if(m.cheats){ store.cheats=Object.assign({},m.cheats); }
+        saveStore(store); refreshCoinUI(); if(typeof renderCheatBar==='function') renderCheatBar();
+        if(m.t==='acct') flashBanner('🔑 Account active — coins are server-tracked now', '#3cd070');
+      }
+      else if (m.t==='buycheatResult'){
+        if(m.ok){ store.coins=m.coins; store.cheats=Object.assign({},m.cheats); saveStore(store);
+          renderCheats(); refreshCoinUI(); renderCheatBar(); }
+        else flashBanner(m.reason==='poor'?'Not enough coins (server says!)':'Purchase failed', '#ff5a7a');
+      }
+      else if (m.t==='welcome'){ myId=m.id; GW=m.w; GH=m.h; activeMode=m.mode||selectedMode;
         boostMs=m.boostMs||10000; cooldownMs=m.cooldownMs||10000;
         blocked = m.blocked ? rleDecode(m.blocked, GW*GH) : null;
         mapOutline = m.outline || null;
@@ -1101,6 +1129,7 @@
   let boostedThisLife = false;  // did I boost this life (for Untouchable)
   let cutThisRound = false;     // was I cut this round (for Flawless)
   let winStreakLive = 0;        // consecutive round wins this session (🔥 flames)
+  let acctMode = false;         // PIN account: the server owns my coin balance
   // ---- KILL FEED (also shows chat/emotes briefly) ----
   function addFeed(html, ms){
     const wrap=document.getElementById('killFeed'); if(!wrap) return;
@@ -1426,11 +1455,13 @@
     ground.rotation.x = -Math.PI/2;
     ground.position.set(GW/2, 0, GH/2);       // world (x,z) == grid (x,y)
     scene.add(ground);
+    const cellMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
     const cells = new THREE.InstancedMesh(
-      new THREE.BoxGeometry(1, 1, 1),
-      new THREE.MeshLambertMaterial({ color: 0xffffff }),
-      GW * GH
+      new THREE.BoxGeometry(1, 1, 1), cellMat, GW * GH
     );
+    cells.instanceColor = new THREE.InstancedBufferAttribute(
+      new Float32Array(GW * GH * 3).fill(1), 3);
+    cellMat.needsUpdate = true;
     cells.count = 0;
     scene.add(cells);
     three = {
@@ -1501,7 +1532,7 @@
     g.fillStyle='#f2f6f4';
     g.fillText(String(name||'?').slice(0,14),128,33);
     const sp=new THREE.Sprite(new THREE.SpriteMaterial({ map:new THREE.CanvasTexture(c), depthTest:false }));
-    sp.scale.set(5.6,1.4,1); sp.position.y=2.5;
+    sp.scale.set(3,0.75,1); sp.position.y=1.7;
     return sp;
   }
 
@@ -1914,6 +1945,7 @@
     document.getElementById('stormHud').classList.add('hidden');
     hide3D();
     document.getElementById('edgeFade').style.opacity='0';
+    acctMode=false;
     brState=null;
     joinScreen.classList.remove('hidden');
     statusEl.textContent='';
@@ -2097,6 +2129,11 @@
     }).join('');
     grid.querySelectorAll('[data-buycheat]').forEach(b=>b.onclick=()=>{
       const c=CHEATS.find(x=>x.id===b.dataset.buycheat);
+      if(acctMode){
+        if(connected&&ws&&ws.readyState===1) ws.send(JSON.stringify({t:'buycheat', id:c.id}));
+        else flashBanner('Join a game to buy cheats on your account', '#9fb0aa');
+        return;
+      }
       if(store.coins>=c.cost){ store.coins-=c.cost; store.cheats[c.id]=(store.cheats[c.id]||0)+1;
         store.coinsSpent=(store.coinsSpent||0)+c.cost; saveStore(store);
         if(store.coinsSpent>=10000) awardTrophy('bigspender');
