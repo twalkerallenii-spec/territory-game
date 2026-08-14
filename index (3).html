@@ -248,7 +248,7 @@
      (the base button rule is width:100%, so 'auto' meant 'card-wide') */
   #nameInput{min-width:0;}
   #diceBtn.ghost,#ownNameBtn.ghost{flex:0 0 46px;width:46px;min-width:46px;padding:10px 0;}
-  #pinInput{flex:0 0 76px;width:76px;min-width:0;}
+  #pinInput{flex:0 0 96px;width:96px;min-width:0;}
   /* de-cramp the whole menu: tighter rhythm so everything fits on one screen */
   #joinScreen .modepick{margin:10px 0 4px;}
   #joinScreen .setrow{margin:8px 0 0;}
@@ -483,7 +483,7 @@
         <input id="nameInput" maxlength="16" placeholder="enter your name" autocomplete="off" style="flex:1;" />
         <button class="ghost" id="diceBtn" title="Random name" style="padding:10px 12px;">🎲</button>
         <button class="ghost" id="ownNameBtn" title="Own this name forever (5,000 coins)" style="padding:10px 12px;">🔒</button>
-        <input id="pinInput" maxlength="8" placeholder="PIN" inputmode="numeric" title="Optional 4-8 digit PIN: makes this name a server account (real coins, cheat-proof)" style="width:74px;flex:0 0 auto;" />
+        <input id="pinInput" maxlength="24" placeholder="password" type="password" autocomplete="off" title="Optional password (4+ characters): makes this name a real server account — coins tracked server-side, cheat-proof, protected from impostors" style="width:96px;flex:0 0 auto;" />
       </div>
       <div class="modepick">
         <button class="modeopt active" data-mode="classic">
@@ -982,7 +982,7 @@
         if(typeof m.coins==='number'){ store.coins=m.coins; }
         if(m.cheats){ store.cheats=Object.assign({},m.cheats); }
         saveStore(store); refreshCoinUI(); if(typeof renderCheatBar==='function') renderCheatBar();
-        if(m.t==='acct') flashBanner('🔑 Account active — coins are server-tracked now', '#3cd070');
+        if(m.t==='acct') flashBanner('🔑 Signed in — your coins live on the server now', '#3cd070');
       }
       else if (m.t==='buycheatResult'){
         if(m.ok){ store.coins=m.coins; store.cheats=Object.assign({},m.cheats); saveStore(store);

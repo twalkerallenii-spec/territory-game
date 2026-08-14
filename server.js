@@ -1610,12 +1610,12 @@ wss.on('connection', (ws) => {
       if (mode === 'teams') pairIntoTeam(player);
       player.lastInput = Date.now();
       // ACCOUNTS: a PIN turns this name into a server-side account.
-      const pin = ('' + (m.pin || '')).trim();
-      if (/^[0-9]{4,8}$/.test(pin)) {
+      const pin = ('' + (m.pin || '')).trim().slice(0, 24);
+      if (pin.length >= 4) {
         const key = normalizeName(nm || 'Player').toLowerCase();
         const hp = pinHash(pin);
         if (accounts[key] && accounts[key].pin !== hp) {
-          send(ws, { t: 'nameReject', reason: 'pin', message: 'Wrong PIN for this account. 🔑' });
+          send(ws, { t: 'nameReject', reason: 'pin', message: 'Wrong password for this name. 🔑' });
           teamDepart(player); entities.delete(player.id); player = null; return;
         }
         if (!accounts[key]) {
