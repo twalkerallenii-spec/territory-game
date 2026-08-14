@@ -66,7 +66,8 @@
   @keyframes drop{from{opacity:0;transform:translateY(-26px) rotate(-8deg);}to{opacity:1;transform:translateY(0) rotate(0);}}
   .sub{color:#c3d2cc;font-size:13px;margin:8px 0 20px;line-height:1.6;}
   .modepick{display:flex;gap:10px;margin-bottom:14px;}
-  .modeopt{flex:1;background:rgba(255,255,255,.06);border:2px solid transparent;border-radius:14px;
+  .modepick{flex-wrap:wrap;}
+  .modeopt{flex:1 1 30%;min-width:100px;background:rgba(255,255,255,.06);border:2px solid transparent;border-radius:14px;
     padding:12px 8px;display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;
     color:#dfeae6;transition:all .15s ease;box-shadow:none;pointer-events:auto;}
   .modeopt:hover{background:rgba(255,255,255,.1);}
@@ -410,6 +411,7 @@
       <div style="display:flex;gap:8px;align-items:center;">
         <input id="nameInput" maxlength="16" placeholder="enter your name" autocomplete="off" style="flex:1;" />
         <button class="ghost" id="diceBtn" title="Random name" style="padding:10px 12px;">🎲</button>
+        <button class="ghost" id="ownNameBtn" title="Own this name forever (5,000 coins)" style="padding:10px 12px;">🔒</button>
       </div>
       <div class="modepick">
         <button class="modeopt active" data-mode="classic">
@@ -423,6 +425,21 @@
         </button>
         <button class="modeopt" data-mode="teams">
           <span class="mi">🤝</span><span class="mt">Teams</span><span class="md">2v2 · shared land</span>
+        </button>
+        <button class="modeopt" data-mode="tron">
+          <span class="mi">🏍️</span><span class="mt">Tron</span><span class="md">Walls forever · last alive</span>
+        </button>
+        <button class="modeopt" data-mode="speed">
+          <span class="mi">💨</span><span class="mt">Speed</span><span class="md">Everything 1.6×</span>
+        </button>
+        <button class="modeopt" data-mode="tiny">
+          <span class="mi">🔬</span><span class="mt">Tiny</span><span class="md">Micro arena · chaos</span>
+        </button>
+        <button class="modeopt" data-mode="bounty">
+          <span class="mi">🎯</span><span class="mt">Bounty</span><span class="md">Cut #1 · 5× coins</span>
+        </button>
+        <button class="modeopt" data-mode="chaos">
+          <span class="mi">🎲</span><span class="mt">Chaos</span><span class="md">Random global events</span>
         </button>
       </div>
       <div class="setrow">
@@ -682,6 +699,16 @@
     {id:'quarter',     ic:'📐', nm:'Quarter Master', ds:'Control 25% of the map at once.'},
     {id:'bothunter',   ic:'🎯', nm:'Bot Hunter',     ds:'Get 50 kills total.'},
     {id:'flawless',    ic:'💎', nm:'Flawless',       ds:'Win a round without being cut.'},
+    {id:'lightcycle',  ic:'🏍️', nm:'Lightcycle',     ds:'Win a Tron round.'},
+    {id:'namelord',    ic:'🔒', nm:'Name Lord',      ds:'Permanently own a name.'},
+    {id:'collector',   ic:'🎨', nm:'Collector',      ds:'Own 8 skins.'},
+    {id:'daily7',      ic:'🗓️', nm:'Regular',        ds:'Claim 7 daily bonuses.'},
+    {id:'social',      ic:'💬', nm:'Chatterbox',     ds:'Send 25 chats or emotes.'},
+    {id:'globetrotter',ic:'🌐', nm:'Globetrotter',   ds:'Play every game mode.'},
+    {id:'tycoon',      ic:'🏦', nm:'Name Tycoon',    ds:'Own 3 names.'},
+    {id:'veteran',     ic:'🎖️', nm:'Veteran',        ds:'Play 100 matches.'},
+    {id:'slayer',      ic:'🗡️', nm:'Slayer',         ds:'250 lifetime kills.'},
+    {id:'chaoschamp',  ic:'🌪️', nm:'Chaos Champion', ds:'Win a round in Chaos mode.'},
   ];
   function awardTrophy(id){
     store.trophies = store.trophies || {};
@@ -737,9 +764,19 @@
   (function dailyBonus(){
     const today = new Date().toDateString();
     if (store.dailyAt !== today){
-      store.dailyAt = today; saveStore(store);
-      addCoins(500);
-      setTimeout(()=>flashBanner('🗓️ Daily bonus: +500 coins!', '#ffd23f'), 600);
+      // LOGIN STREAK: consecutive days grow the bonus (500 + 100/day, cap 1500);
+      // missing a day resets the streak.
+      const yesterday = new Date(Date.now()-86400000).toDateString();
+      store.dailyStreak = (store.dailyAt === yesterday) ? (store.dailyStreak||0)+1 : 1;
+      store.dailyAt = today;
+      store.dailyCount=(store.dailyCount||0)+1;
+      const bonus = Math.min(1500, 500 + (store.dailyStreak-1)*100);
+      saveStore(store);
+      if(store.dailyCount>=7) awardTrophy('daily7');
+      addCoins(bonus);
+      setTimeout(()=>flashBanner('🗓️ Day '+store.dailyStreak+' streak: +'+bonus+' coins!', '#ffd23f'), 600);
+      // DAILY FREE CRATE: one random skin chance per day
+      setTimeout(()=>{ openCrate(true); }, 1800);
     }
   })();
 
@@ -811,7 +848,8 @@
     boostState = 'idle'; boostStart = 0;
     activeMode = selectedMode;
     ws.onopen = () => { connected = true; statusEl.textContent='joining…';
-      ws.send(JSON.stringify({t:'join', name, loadout: store.equip, skin: store.skin, mode: selectedMode, coins: store.coins})); };
+      ws.send(JSON.stringify({t:'join', name, loadout: store.equip, skin: store.skin, mode: selectedMode, coins: store.coins,
+        nameToken: (store.ownedNames||{})[name.trim().toLowerCase()] || null })); };
     ws.onclose = () => { connected = false; statusEl.textContent='disconnected — refresh to reconnect'; };
     ws.onerror = () => { statusEl.textContent='connection error'; };
     ws.onmessage = (ev) => {
@@ -830,8 +868,11 @@
         document.getElementById('myStatLab').textContent = activeMode==='br' ? 'territory · 1 life' : 'your territory';
         lastMyArea = null; lowestPct = 100; Sound.start();
         boostedThisLife=false; cutThisRound=false; machUntil=0; lastKillT=0;
-        store.matchesPlayed=(store.matchesPlayed||0)+1; saveStore(store);
+        store.matchesPlayed=(store.matchesPlayed||0)+1;
+        store.modesPlayed=store.modesPlayed||{}; store.modesPlayed[activeMode]=1; saveStore(store);
         if(store.matchesPlayed>=25) awardTrophy('marathoner');
+        if(store.matchesPlayed>=100) awardTrophy('veteran');
+        if(['classic','br','3d','teams','tron','speed','tiny','bounty','chaos'].every(k=>store.modesPlayed[k])) awardTrophy('globetrotter');
         playMapIntro(m.mapName||'The Arena', false);   // "Starting match" intro
       }
       else if (m.t==='full'){ statusEl.textContent='world is full — try again shortly'; }
@@ -845,13 +886,15 @@
       else if (m.t==='storm'){ if(m.blocked) blocked=rleDecode(m.blocked, GW*GH); }
       else if (m.t==='roundreset'){ if(m.blocked) blocked=rleDecode(m.blocked, GW*GH); if(m.outline) mapOutline=m.outline; onRoundReset(m.winner, m.mapName); }
       else if (m.t==='kill'){ Sound.kill(); const base=(m.coins||20); const c=Math.round(base*coinMult); addCoins(c);
-        flashCoins('+'+c + (m.mult>1?(' · x'+m.mult+' streak!'):''));
+        flashCoins('+'+c + (m.bounty?' 🎯 BOUNTY!':'') + (m.mult>1?(' · x'+m.mult+' streak!'):''));
+        if(m.bounty) flashBanner('🎯 BOUNTY CLAIMED — 5× coins!', '#ffd23f');
         store.lifetimeKills=(store.lifetimeKills||0)+1; saveStore(store);
         awardTrophy('first_blood');
         if((m.total||0)>=3) awardTrophy('hat_trick');
         if((m.total||0)>=5) awardTrophy('spree');
         if(store.lifetimeKills>=50) awardTrophy('bothunter');
         if(store.lifetimeKills>=100) awardTrophy('centurion');
+        if(store.lifetimeKills>=250) awardTrophy('slayer');
         // Double Kill: two cuts within 3s
         const now=performance.now();
         if(lastKillT && now-lastKillT<=3000) awardTrophy('double');
@@ -860,9 +903,16 @@
         if(now < machUntil) awardTrophy('speeddemon');
         // Untouchable/Flawless tracking: a kill doesn't break these; being cut does
       }
-      else if (m.t==='fullmap'){ Sound.win(); confetti(); const c=Math.round((m.coins||1000)*coinMult); addCoins(c); flashCoins('+'+c+' 100%!'); awardTrophy('conqueror'); }
+      else if (m.t==='fullmap'){ winStreakLive++; Sound.win(); confetti(); if(activeMode==='chaos') awardTrophy('chaoschamp'); const c=Math.round((m.coins||1000)*coinMult); addCoins(c); flashCoins('+'+c+' 100%!'); awardTrophy('conqueror'); }
       else if (m.t==='chat'){ addChat(m.name, m.color, m.text); addFeed('💬 <span class="fk" style="color:'+m.color+'">'+escapeHtml(m.name)+'</span> '+escapeHtml(m.text), 3000); }
       else if (m.t==='feed'){ onFeed(m); }
+      else if (m.t==='tronwin'){
+        const mine = m.winnerId===myId;
+        if(mine) winStreakLive++;
+        flashBanner('🏍️ '+(mine?'You win the round!':(m.winner+' wins the round!')), '#ffd23f');
+        if(mine){ const c=Math.round((m.coins||800)*coinMult); addCoins(c); flashCoins('+'+c+' Tron!'); confetti(); awardTrophy('lightcycle'); Sound.win(); }
+      }
+      else if (m.t==='chaosevent'){ flashBanner(m.label||'🎲 CHAOS!', '#b478ff'); Sound.cheat(); }
     };
   }
 
@@ -930,18 +980,19 @@
                `<div class="trow">${stats}</div>`;
       }).join('');
     } else {
+    const tron = activeMode==='tron';
     const list = [...ents.entries()].map(([id,e])=>({id,...e}))
-      .sort((a,b)=>b.area-a.area).slice(0,8);
+      .sort((a,b)=> tron ? (b.kl-a.kl) : (b.area-a.area)).slice(0,8);
     boardRows.innerHTML = list.map((e,i)=>{
-      const pct = (e.area/total*100).toFixed(2);
+      const stat = tron ? ('⚔'+(e.kl||0)) : ((e.area/total*100).toFixed(2)+'%');
       const me = e.id===myId ? ' me':'';
       return `<div class="row${me}"><span class="rank">${i+1}</span><span class="dot" style="background:${e.color}"></span>`+
-             `<span class="nm">${escapeHtml(e.name)}</span><span class="pct">${pct}%</span></div>`;
+             `<span class="nm">${escapeHtml(e.name)}</span><span class="pct">${stat}</span></div>`;
     }).join('');
     }
     const me = ents.get(myId);
     if (me){
-      myAreaEl.textContent = (me.area/total*100).toFixed(2)+'%';
+      myAreaEl.textContent = (me.area/total*100).toFixed(2)+'%' + (winStreakLive>=2?('  🔥x'+winStreakLive):'');
       if (lastMyArea!==null && me.area > lastMyArea + 3) Sound.capture();
       lastMyArea = me.area;
       // trophy tracking
@@ -957,6 +1008,7 @@
   let machUntil = 0;     // mach-speed active until (for Speed Demon)
   let boostedThisLife = false;  // did I boost this life (for Untouchable)
   let cutThisRound = false;     // was I cut this round (for Flawless)
+  let winStreakLive = 0;        // consecutive round wins this session (🔥 flames)
   // ---- KILL FEED (also shows chat/emotes briefly) ----
   function addFeed(html, ms){
     const wrap=document.getElementById('killFeed'); if(!wrap) return;
@@ -1024,6 +1076,8 @@
     const EMOTES={KeyZ:'gg',KeyX:'nice!',KeyC:'😱',KeyV:'😂'};
     if (EMOTES[e.code] && connected && ws && ws.readyState===1){
       ws.send(JSON.stringify({t:'chat', text:EMOTES[e.code]}));
+      store.chatSent=(store.chatSent||0)+1; saveStore(store);
+      if(store.chatSent>=25) awardTrophy('social');
       e.preventDefault(); return;
     }
     // 3D chase cam: left/right turn RELATIVE to your heading (like a snake
@@ -1087,6 +1141,7 @@
   function onDeath(reason, killerId, eliminated, placement){
     isDead = true;
     if (reason==='cut' || killerId) cutThisRound = true;   // a rival cut me -> not flawless
+    winStreakLive = 0;                                     // dying snuffs the flames
     spectateId = (killerId && ents.has(killerId)) ? killerId : null;
     const killer = spectateId ? ents.get(spectateId) : null;
 
@@ -1103,7 +1158,9 @@
     }
     const labels={cut:'cut by a rival',self:'crossed your own trail'};
     deathReason.textContent = labels[reason]||'eliminated';
-    spectateLabel.textContent = killer ? ('Spectating '+killer.name) : 'Spectating the board';
+    spectateLabel.textContent = (activeMode==='tron')
+      ? 'Crashed! Next round starts when one rider remains…'
+      : (killer ? ('Spectating '+killer.name) : 'Spectating the board');
     deathScreen.classList.remove('hidden');
   }
   function onRespawn(){ isDead=false; spectateId=null; deathScreen.classList.add('hidden'); lastMyArea=null; lowestPct=100; boostedThisLife=false; }
@@ -1681,6 +1738,30 @@
   };
   nameInput.addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('playBtn').click();});
   const RAND_NAMES=['MangoBlast','PixelFox','TurboSnail','CaptainZoom','NoodleKing','SirCutsALot','GlowWorm','MegaMuffin','ZippyZebra','RocketRadish','WaffleWizard','NinjaNacho','BoltBunny','CosmicCarl','JellyJet','PeppyPenguin','DizzyDino','SnackAttack','LunaLoop','GigaGoose'];
+  // ---- OWN A NAME: pay 5,000 coins to lock your name to this browser ----
+  store.ownedNames = store.ownedNames || {};
+  document.getElementById('ownNameBtn').onclick=()=>{
+    const nm=(nameInput.value||'').trim();
+    if(!nm){ flashBanner('Type a name first, then 🔒 to own it', '#9fb0aa'); return; }
+    const key=nm.toLowerCase();
+    if(store.ownedNames[key]){ flashBanner('🔒 You already own "'+nm+'"', '#3cd070'); return; }
+    if((store.coins||0)<5000){ flashBanner('Need 5,000 coins to own a name', '#ff5a7a'); return; }
+    const tok=Math.random().toString(36).slice(2)+Math.random().toString(36).slice(2);
+    const proto=location.protocol==='https:'?'wss://':'ws://';
+    let bws; try{ bws=new WebSocket(proto+location.host); }catch(_){ flashBanner('Connection failed', '#ff5a7a'); return; }
+    const bail=setTimeout(()=>{ try{bws.close();}catch(_){} }, 6000);
+    bws.onopen=()=>bws.send(JSON.stringify({t:'buyname', name:nm, token:tok}));
+    bws.onmessage=(ev)=>{ clearTimeout(bail);
+      let r={}; try{ r=JSON.parse(ev.data);}catch(_){}
+      if(r.t==='buynameResult'){
+        if(r.ok){ store.coins-=5000; store.ownedNames[key]=tok; saveStore(store); refreshCoinUI();
+          Sound.win(); flashBanner('🔒 "'+nm+'" is yours forever! (-5,000)', '#ffd23f'); awardTrophy('namelord');
+          if(Object.keys(store.ownedNames).length>=3) awardTrophy('tycoon'); }
+        else { flashBanner(r.reason==='taken' ? 'That name is already owned 🔒' : 'Could not buy that name', '#ff5a7a'); }
+      }
+      try{bws.close();}catch(_){}
+    };
+  };
   document.getElementById('diceBtn').onclick=()=>{
     nameInput.value=RAND_NAMES[(Math.random()*RAND_NAMES.length)|0]+((Math.random()*99)|0);
   };
@@ -1827,7 +1908,7 @@
     }).join('');
     grid.querySelectorAll('[data-buyskin]').forEach(b=>b.onclick=()=>{
       const s=SKINS.find(x=>x.id===b.dataset.buyskin);
-      if(store.coins>=s.cost){ store.coins-=s.cost; store.skins[s.id]=true; store.coinsSpent=(store.coinsSpent||0)+s.cost; saveStore(store); if(store.coinsSpent>=10000) awardTrophy("bigspender"); renderSkins(); refreshCoinUI(); }
+      if(store.coins>=s.cost){ store.coins-=s.cost; store.skins[s.id]=true; store.coinsSpent=(store.coinsSpent||0)+s.cost; saveStore(store); if(store.coinsSpent>=10000) awardTrophy("bigspender"); if(Object.keys(store.skins).length>=8) awardTrophy('collector'); renderSkins(); refreshCoinUI(); }
     });
     grid.querySelectorAll('[data-equipskin]').forEach(b=>b.onclick=()=>{
       store.skin=b.dataset.equipskin; saveStore(store); renderSkins(); refreshCoinUI();
@@ -1840,7 +1921,30 @@
   document.getElementById('howGotIt').onclick=closeModals;
   document.getElementById('cheatsBtn').onclick=()=>{ renderCheats(); cheatsModal.classList.remove('hidden'); };
   document.getElementById('trophiesBtn').onclick=()=>{ renderTrophies(); trophiesModal.classList.remove('hidden'); };
+  const crateBtn=document.getElementById('crateBtn'); if(crateBtn) crateBtn.onclick=()=>openCrate(false);
   document.getElementById('statsBtn').onclick=()=>{ renderStats(); statsModal.classList.remove('hidden'); };
+  // MYSTERY CRATE: pays out a random skin you don't own; duplicates impossible.
+  // Free daily crate falls back to coins when every skin is owned.
+  function openCrate(free){
+    const unowned = SKINS.filter(k=>k.cost>0 && !store.skins[k.id]);
+    if(unowned.length===0){
+      if(free){ addCoins(300); flashBanner('🎁 Daily crate: all skins owned — +300 coins', '#ffd23f'); }
+      else flashBanner('You own every skin already! 🎨', '#3cd070');
+      return;
+    }
+    if(!free){
+      if((store.coins||0)<1000){ flashBanner('Crates cost 1,000 coins', '#ff5a7a'); return; }
+      store.coins-=1000; store.coinsSpent=(store.coinsSpent||0)+1000;
+      if(store.coinsSpent>=10000) awardTrophy('bigspender');
+    }
+    const win = unowned[(Math.random()*unowned.length)|0];
+    store.skins[win.id]=true; saveStore(store);
+    Sound.win(); confetti();
+    flashBanner((free?'🎁 Daily crate: ':'📦 Crate opened: ')+win.nm+' skin unlocked!', '#ffd23f');
+    if(Object.keys(store.skins).length>=8) awardTrophy('collector');
+    refreshCoinUI();
+    if(typeof renderSkins==='function' && !skinsModal.classList.contains('hidden')) renderSkins();
+  }
   function renderStats(){
     const tro=Object.keys(store.trophies||{}).length;
     const rows=[
