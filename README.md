@@ -101,3 +101,66 @@ Render speed is independent: `CELL_SCREEN` in `index.html` sets pixels per cell.
 - `server.js` — authoritative sim + HTTP/WS server
 - `index.html` — the game client (served by the server at `/`)
 - `package.json` — deps + start script
+
+---
+
+## Repository details (added automatically)
+
+- Repo: twalkerallenii-spec/territory-game
+- Repo ID: 1253834233
+- Languages (from analysis):
+  - HTML: 77.2%
+  - JavaScript: 22.8%
+
+Top-level entries (name — size bytes — type):
+
+- .git-revert — 84 — file
+- README.md — 4220 — file (this file)
+- cover.png — 521755 — file (project cover image)
+- index (1).html — 140031 — file (alternate client file)
+- index (3).html — 140031 — file (alternate client file)
+- index (5).html — 140031 — file (alternate client file)
+- index.html — 140031 — file (main single-file canvas client)
+- itch-embed.html — 2339 — file (Itch.io embedding helper)
+- itch-store-page.md — 3768 — file (store page content for itch)
+- package.json — 321 — file (npm manifest; Node >=18; dependency: ws)
+- server (1).js — 82889 — file (duplicate/variant of server.js)
+- server.js — 82889 — file (authoritative server)
+
+package.json summary:
+- name: paperio-class
+- version: 1.0.0
+- main: server.js
+- scripts:
+  - start: node server.js
+- engines: node >=18
+- dependencies: ws ^8.21.0
+
+Notable server.js details (authoritative server implementation):
+- Main features: authoritative simulation, single shared room per mode, full
+  snapshot broadcast each tick, bots to populate the world, multiple game modes
+  (classic, br, teams, tron, speed, tiny, bounty, chaos, 3d).
+- Tunable constants at top of file (current values):
+  - GRID_W = 160, GRID_H = 160
+  - TICK_RATE = 20
+  - CELLS_PER_SEC = 13
+  - BOOST_MULT = 1.7, BOOST_DURATION_MS = 10000, BOOST_COOLDOWN_MS = 10000
+  - ROOM_CAP = 22, MIN_BOTS = 6, BOT_RESPAWN_MS = 120000
+  - SPAWN_BLOB = 3, SPAWN_SAFE_RADIUS = 14
+- World state stored in typed arrays (Uint8Array): owner, trail, blocked
+- RLE encoding used for grid transfer to clients
+- Persistent files referenced at runtime: accounts.json, owned-names.json (server reads/writes these at repo root if present)
+- Static serving restricted to index.html; other files are not exposed over HTTP by default
+
+Notes & tips:
+- Start locally with `npm install` then `npm start` (Node 18+).
+- The server expects to run as a persistent process (Render, Railway, Fly.io, Glitch, etc.).
+- The repo primarily contains HTML (client) and JS (server) in one-folder layout.
+
+If you want, I can:
+- Remove duplicate files (e.g., `server (1).js`, `index (1).html` variants) or
+  consolidate them.
+- Add a short "Development" section with how to debug / inspect the running
+  simulation (e.g., toggling TICK_RATE, logging, or loading the client locally).
+
+
