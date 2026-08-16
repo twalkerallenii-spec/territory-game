@@ -9,6 +9,7 @@ const http = require('http');
 const path = require('path');
 const fs = require('fs');
 const { WebSocketServer } = require('ws');
+const crypto = require('crypto');
 
 // ---- TUNABLE KNOBS (Blueprint Sec 19 — illustrative defaults) --------------
 const GRID_W = 160;
@@ -357,10 +358,34 @@ function saveAccounts() {           // throttled write
   acctSaveTimer = setTimeout(() => { acctSaveTimer = null;
     try { fs.writeFileSync(ACCTS_FILE, JSON.stringify(accounts)); } catch (_) {} }, 500);
 }
-function pinHash(pin) {             // lightweight salted hash (not bank-grade; good enough here)
+function pinHash(pin) {             // LEGACY hash — kept only to verify + upgrade old accounts
   let h = 5381; const str = 'papersalt:' + pin;
   for (let i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) >>> 0;
   return h.toString(36);
+}
+// Proper password hashing with scrypt (built into Node — no extra deps).
+// Stored as "scrypt:<saltHex>:<hashHex>".
+function hashPassword(pw) {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = crypto.scryptSync(String(pw), salt, 64).toString('hex');
+  return 'scrypt:' + salt + ':' + hash;
+}
+function verifyPassword(account, pw) {
+  if (!account) return false;
+  if (typeof account.pw === 'string' && account.pw.startsWith('scrypt:')) {
+    const parts = account.pw.split(':');
+    const want = Buffer.from(parts[2] || '', 'hex');
+    let got;
+    try { got = crypto.scryptSync(String(pw), parts[1] || '', want.length || 64); } catch (_) { return false; }
+    return want.length > 0 && want.length === got.length && crypto.timingSafeEqual(want, got);
+  }
+  // Legacy account (djb2 pin): verify with the old hash, then transparently
+  // upgrade it to scrypt so the weak hash is gone after the next login.
+  if (account.pin && account.pin === pinHash(pw)) {
+    account.pw = hashPassword(pw); delete account.pin; saveAccounts();
+    return true;
+  }
+  return false;
 }
 const CHEAT_PRICES = { god:10000, mach:8000, thief:7000, quake:6000, titan:5000,
                        empire:4500, freeze:3800, phantom:3200, grand:2000 };
@@ -1738,13 +1763,19 @@ wss.on('connection', (ws) => {
     if (m.t === 'menuboard') {
       // Persistent player stats (accounts) + live CPU kills, so a player's
       // kills/wins stay on the board even after they leave the game.
-      const room = rooms['classic'];
       const rows = [];
-      if (room) for (const e of room.entities.values())
-        if (e.isBot) rows.push({ n: e.name, c: e.color, b: 1, k: e.kills || 0, w: 0 });
+      // persistent players (accounts)
       for (const k of Object.keys(accounts)) {
         const a = accounts[k];
         rows.push({ n: a.name || k, c: a.color || '#ffd23f', b: 0, k: a.kills || 0, w: a.wins || 0 });
+      }
+      // live CPUs (Classic) + live GUESTS in any room (no account) — these are
+      // temporary and drop off the board as soon as the guest leaves the game.
+      for (const mode of Object.keys(rooms)) {
+        for (const e of rooms[mode].entities.values()) {
+          if (e.isBot) { if (mode === 'classic') rows.push({ n: e.name, c: e.color, b: 1, k: e.kills || 0, w: 0 }); }
+          else if (!e.account) rows.push({ n: e.name, c: e.color, b: 0, k: e.kills || 0, w: 0 });
+        }
       }
       const kills = [...rows].sort((a, b) => b.k - a.k || b.w - a.w).slice(0, 8);
       const wins = [...rows].sort((a, b) => b.w - a.w || b.k - a.k).slice(0, 8);
@@ -1777,7 +1808,7 @@ wss.on('connection', (ws) => {
         if (accounts[akey]) { send(ws, { t: 'authReject', reason: 'taken', message: 'That username is taken — try logging in.' }); return; }
       } else if (auth === 'login') {
         if (!accounts[akey]) { send(ws, { t: 'authReject', reason: 'nouser', message: 'No account with that name — sign up first.' }); return; }
-        if (accounts[akey].pin !== pinHash(pass)) { send(ws, { t: 'authReject', reason: 'wrongpass', message: 'Wrong password.' }); return; }
+        if (!verifyPassword(accounts[akey], pass)) { send(ws, { t: 'authReject', reason: 'wrongpass', message: 'Wrong password.' }); return; }
       } else if (accounts[akey]) {
         send(ws, { t: 'authReject', reason: 'registered', message: 'That name is registered — log in or pick another.' }); return;
       }
@@ -1791,7 +1822,7 @@ wss.on('connection', (ws) => {
       player.lastInput = Date.now();
 
       if (auth === 'signup') {
-        accounts[akey] = { pin: pinHash(pass), name: nm, color: player.color,
+        accounts[akey] = { pw: hashPassword(pass), name: nm, color: player.color,
                            coins: 3000, kills: 0, wins: 0, cheats: {}, lastDaily: '' };
       }
       if (auth !== 'guest') {
