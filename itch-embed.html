@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>Territory — paper.io-class</title>
+<style>
+  html,body{margin:0;height:100%;background:#1a2c28;overflow:hidden;}
+  #frame{position:fixed;inset:0;width:100%;height:100%;border:0;display:block;}
+  #load{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    background:radial-gradient(130% 130% at 50% 30%, #3a5a52 0%, #243d38 55%, #1a2c28 100%);
+    color:#eef3f0;font-family:ui-monospace,"SFMono-Regular",Menlo,monospace;z-index:2;transition:opacity .5s ease;}
+  #load.hide{opacity:0;pointer-events:none;}
+  .logo{font-size:46px;font-weight:800;letter-spacing:1px;line-height:1;
+    text-shadow:0 3px 0 #b9c4be, 0 5px 0 #98a6a0, 0 7px 10px rgba(0,0,0,.45);}
+  .logo .io{color:#ffd23f;font-size:27px;margin-left:3px;}
+  .spin{margin-top:24px;width:34px;height:34px;border:4px solid rgba(255,255,255,.18);
+    border-top-color:#ffd23f;border-radius:50%;animation:spin 1s linear infinite;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+  .msg{margin-top:18px;font-size:13px;color:#c3d2cc;}
+  .sub{margin-top:6px;font-size:11px;color:#8a9691;text-align:center;max-width:320px;line-height:1.6;}
+</style>
+</head>
+<body>
+  <div id="load">
+    <div class="logo">PAPER<span class="io">io</span></div>
+    <div class="spin"></div>
+    <div class="msg">Loading the arena…</div>
+    <div class="sub">First load can take ~30&nbsp;seconds while the server wakes from sleep.</div>
+  </div>
+
+  <!-- The whole game lives on the Render backend; this page just embeds it. -->
+  <iframe id="frame"
+          src="https://territory-game-5c0c.onrender.com"
+          allow="autoplay; fullscreen"
+          allowfullscreen></iframe>
+
+  <script>
+    var frame = document.getElementById('frame');
+    var load  = document.getElementById('load');
+    function hideLoader(){
+      load.classList.add('hide');
+      setTimeout(function(){ load.style.display = 'none'; }, 600);
+    }
+    // The iframe's load event fires once Render has responded (after any wake-up).
+    frame.addEventListener('load', hideLoader);
+    // Safety net: never leave the loader up forever.
+    setTimeout(hideLoader, 45000);
+  </script>
+</body>
+</html>
