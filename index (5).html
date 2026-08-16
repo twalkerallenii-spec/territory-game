@@ -27,6 +27,7 @@
   .dot{width:11px;height:11px;border-radius:3px;flex:0 0 auto;}
   .nm{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   .pct{color:var(--muted);font-variant-numeric:tabular-nums;}
+  .kc{color:#c98b2a;font-size:11px;font-variant-numeric:tabular-nums;margin-right:8px;}
   .me .nm{color:var(--accent);font-weight:700;}
 
   #homeBtn{position:absolute;top:14px;right:14px;width:40px;height:40px;border-radius:12px;
@@ -90,6 +91,12 @@
     border-radius:999px;padding:8px 16px;font-weight:700;color:#7a5b15;z-index:2;box-shadow:0 6px 18px rgba(120,110,90,.15);}
   .coinIcon{color:#f5b301;}
   .menurow{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:10px;}
+  .authtabs{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:2px 0 8px;
+    background:rgba(255,255,255,.05);border-radius:12px;padding:4px;}
+  .authtab{width:auto;padding:9px 6px;border-radius:9px;background:transparent;color:#c3d2cc;
+    box-shadow:none;font-weight:700;font-size:12.5px;letter-spacing:.02em;}
+  .authtab:hover{filter:none;background:rgba(255,255,255,.08);}
+  .authtab.active{background:var(--accent);color:#fff;}
   /* menu side leaderboards — fill the empty gutters beside the centered card */
   .sideboard{position:absolute;top:50%;transform:translateY(-50%);width:min(230px,20vw);
     z-index:1;background:rgba(20,34,31,.55);border:1px solid rgba(255,255,255,.08);
@@ -541,11 +548,15 @@
         <span class="L" data-letter="P" style="--d:0">P</span><span class="L" data-letter="A" style="--d:1">A</span><span class="L" data-letter="P2" style="--d:2">P</span><span class="L" data-letter="E" style="--d:3">E</span><span class="L" data-letter="R" style="--d:4">R</span><span class="L io" style="--d:5">io</span>
       </div>
       <div class="sub">Leave home, draw a loop, return to fill it.<br>Cut a rival's trail and steal everything they own. · v1.0</div>
+      <div id="authTabs" class="authtabs">
+        <button class="authtab active" data-auth="guest">Play as Guest</button>
+        <button class="authtab" data-auth="login">Log In</button>
+        <button class="authtab" data-auth="signup">Sign Up</button>
+      </div>
       <div id="nameRow" style="display:flex;gap:8px;align-items:center;">
         <input id="nameInput" maxlength="16" placeholder="enter your name" autocomplete="off" style="flex:1;" />
         <button class="ghost" id="diceBtn" title="Random name" style="padding:10px 12px;">🎲</button>
-        <button class="ghost" id="ownNameBtn" title="Own this name forever (5,000 coins)" style="padding:10px 12px;">🔒</button>
-        <input id="pinInput" maxlength="24" placeholder="password" type="password" autocomplete="off" title="Optional password (4+ characters): makes this name a real server account — coins tracked server-side, cheat-proof, protected from impostors" style="width:96px;flex:0 0 auto;" />
+        <input id="pinInput" maxlength="24" placeholder="password" type="password" autocomplete="off" style="width:120px;flex:0 0 auto;display:none;" />
       </div>
       <div class="modepick">
         <button class="modeopt active" data-mode="classic">
@@ -585,7 +596,7 @@
       <div id="tipLine"></div>
       <button id="playBtn">
         <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" style="vertical-align:-3px;margin-right:8px"><path d="M8 5v14l11-7z"/></svg>
-        Play
+        <span id="playLabel">Play as Guest</span>
       </button>
       <div class="menurow">
         <button class="ghost" id="howBtn">❓ How to Play</button>
@@ -1036,6 +1047,7 @@
     activeMode = selectedMode;
     ws.onopen = () => { connected = true; statusEl.textContent='joining…';
       ws.send(JSON.stringify({t:'join', name, loadout: store.equip, skin: store.skin, mode: selectedMode, coins: store.coins,
+        auth: selectedAuth, pass: (document.getElementById('pinInput').value||'').trim(),
         pin: (document.getElementById('pinInput').value||'').trim(),
         nameToken: (store.ownedNames||{})[name.trim().toLowerCase()] || null })); };
     ws.onclose = () => { connected = false; statusEl.textContent='disconnected — refresh to reconnect'; };
@@ -1043,11 +1055,13 @@
     ws.onmessage = (ev) => {
       const m = JSON.parse(ev.data);
       if (m.t==='nameReject'){ Sound.reject(); onNameReject(m.message); return; }
+      if (m.t==='authReject'){ Sound.reject(); onNameReject(m.message); return; }
       if (m.t==='acct' || m.t==='acctsync'){ acctMode=true;
         if(typeof m.coins==='number'){ store.coins=m.coins; }
         if(m.cheats){ store.cheats=Object.assign({},m.cheats); }
         saveStore(store); refreshCoinUI(); if(typeof renderCheatBar==='function') renderCheatBar();
-        if(m.t==='acct') flashBanner('🔑 Signed in — your coins live on the server now', '#3cd070');
+        if(m.name){ store.lastUser=m.name; store.lastAuth='login'; saveStore(store); }
+        if(m.t==='acct') flashBanner('🔑 Signed in as '+(m.name||'you')+' — progress saved on the server', '#3cd070');
       }
       else if (m.t==='buycheatResult'){
         if(m.ok){ store.coins=m.coins; store.cheats=Object.assign({},m.cheats); saveStore(store);
@@ -1190,10 +1204,10 @@
     const list = [...ents.entries()].map(([id,e])=>({id,...e}))
       .sort((a,b)=> tron ? (b.kl-a.kl) : (b.area-a.area)).slice(0,8);
     boardRows.innerHTML = list.map((e,i)=>{
-      const stat = tron ? ('⚔'+(e.kl||0)) : ((e.area/total*100).toFixed(2)+'%');
+      const pct = tron ? '' : ((e.area/total*100).toFixed(2)+'%');
       const me = e.id===myId ? ' me':'';
       return `<div class="row${me}"><span class="rank">${i+1}</span><span class="dot" style="background:${e.color}"></span>`+
-             `<span class="nm">${escapeHtml(e.name)}</span><span class="pct">${stat}</span></div>`;
+             `<span class="nm">${escapeHtml(e.name)}</span><span class="kc">⚔${e.kl||0}</span><span class="pct">${pct}</span></div>`;
     }).join('');
     }
     const me = ents.get(myId);
@@ -2005,15 +2019,34 @@
   requestAnimationFrame(draw);
 
   // ---- start ----
+  // ---- AUTH: Guest / Log In / Sign Up ----
+  let selectedAuth = 'guest';
+  const pinInput = document.getElementById('pinInput');
+  function applyAuthUI(){
+    document.querySelectorAll('.authtab').forEach(t=>t.classList.toggle('active', t.dataset.auth===selectedAuth));
+    pinInput.style.display = selectedAuth==='guest' ? 'none' : '';
+    if(selectedAuth==='guest') pinInput.value='';
+    pinInput.placeholder = selectedAuth==='signup' ? 'choose a password' : 'password';
+    nameInput.placeholder = selectedAuth==='guest' ? 'enter your name' : 'username';
+    const lbl=document.getElementById('playLabel');
+    if(lbl) lbl.textContent = selectedAuth==='guest' ? 'Play as Guest' : selectedAuth==='login' ? 'Log In & Play' : 'Sign Up & Play';
+  }
+  document.querySelectorAll('.authtab').forEach(b=>b.onclick=()=>{ selectedAuth=b.dataset.auth; applyAuthUI(); if(selectedAuth!=='guest') pinInput.focus(); });
+  if(store.lastAuth==='login' && store.lastUser){ selectedAuth='login'; nameInput.value=store.lastUser; }
+  applyAuthUI();
+
   document.getElementById('playBtn').onclick = ()=>{
-    const name=(nameInput.value||'Player').trim().slice(0,16)||'Player';
+    const name=(nameInput.value||'').trim().slice(0,16);
+    if(!name){ flashBanner('Enter a name first', '#ff5a7a'); nameInput.focus(); return; }
+    if(selectedAuth!=='guest' && (pinInput.value||'').trim().length<4){
+      flashBanner('Password must be at least 4 characters', '#ff5a7a'); pinInput.focus(); return; }
     connect(name);
   };
   nameInput.addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('playBtn').click();});
   const RAND_NAMES=['MangoBlast','PixelFox','TurboSnail','CaptainZoom','NoodleKing','SirCutsALot','GlowWorm','MegaMuffin','ZippyZebra','RocketRadish','WaffleWizard','NinjaNacho','BoltBunny','CosmicCarl','JellyJet','PeppyPenguin','DizzyDino','SnackAttack','LunaLoop','GigaGoose'];
   // ---- OWN A NAME: pay 5,000 coins to lock your name to this browser ----
   store.ownedNames = store.ownedNames || {};
-  document.getElementById('ownNameBtn').onclick=()=>{
+  const ownNameBtn=document.getElementById('ownNameBtn'); if(ownNameBtn) ownNameBtn.onclick=()=>{
     const nm=(nameInput.value||'').trim();
     if(!nm){ flashBanner('Type a name first, then 🔒 to own it', '#9fb0aa'); return; }
     const key=nm.toLowerCase();
@@ -2151,10 +2184,21 @@
                  : `<span class="slot empty">+</span>`;
       }
       html+='</div>';
+      const affordN = SHOP.filter(p=>!store.owned[p.id] && store.coins>=p.cost).length;
+      if(affordN>1) html+='<button class="equip" id="buyAllPups" style="margin-top:8px;width:100%">🛒 Buy all affordable ('+affordN+')</button>';
       slotBar.innerHTML=html;
       slotBar.querySelectorAll('[data-unequip]').forEach(b=>b.onclick=()=>{
         store.equip=store.equip.filter(x=>x!==b.dataset.unequip); saveStore(store); renderShop();
       });
+      const ba=document.getElementById('buyAllPups');
+      if(ba) ba.onclick=()=>{
+        let bought=0, spent=0;
+        for(const p of SHOP){ if(!store.owned[p.id] && store.coins>=p.cost){ store.coins-=p.cost; store.owned[p.id]=true; spent+=p.cost; bought++; } }
+        if(bought){ store.coinsSpent=(store.coinsSpent||0)+spent; saveStore(store);
+          if(store.coinsSpent>=10000) awardTrophy('bigspender'); renderShop(); refreshCoinUI();
+          flashBanner('Bought '+bought+' power-up'+(bought>1?'s':''), '#3cd070'); }
+        else flashBanner('Nothing affordable to buy', '#9fb0aa');
+      };
     }
     const grid=document.getElementById('shopGrid');
     grid.innerHTML = SHOP.map(p=>{
@@ -2277,8 +2321,10 @@
       const can = store.coins>=c.cost;
       const haveTag = have>0 ? `<div class="ds" style="color:#2b7a4b;font-weight:700">Owned: ${have}</div>` : '';
       const btn = `<button class="${can?'locked':'cant'}" data-buycheat="${c.id}">${can?('Buy ● '+c.cost):('Need ● '+c.cost)}</button>`;
+      const maxN = Math.min(99, Math.floor(store.coins/c.cost));
+      const maxBtn = maxN>1 ? `<button class="equip" data-buycheatmax="${c.id}" title="Buy as many as you can afford">Max ×${maxN}</button>` : '';
       return `<div class="item"><div class="ic">${c.ic}</div><div class="nm">${c.nm}</div>`+
-             `<div class="ds">${c.ds}</div>${haveTag}${btn}</div>`;
+             `<div class="ds">${c.ds}</div>${haveTag}${btn}${maxBtn}</div>`;
     }).join('');
     grid.querySelectorAll('[data-buycheat]').forEach(b=>b.onclick=()=>{
       const c=CHEATS.find(x=>x.id===b.dataset.buycheat);
@@ -2291,6 +2337,20 @@
         store.coinsSpent=(store.coinsSpent||0)+c.cost; saveStore(store);
         if(store.coinsSpent>=10000) awardTrophy('bigspender');
         renderCheats(); refreshCoinUI(); renderCheatBar(); }
+    });
+    grid.querySelectorAll('[data-buycheatmax]').forEach(b=>b.onclick=()=>{
+      const c=CHEATS.find(x=>x.id===b.dataset.buycheatmax);
+      const qty=Math.min(99, Math.floor(store.coins/c.cost));
+      if(qty<1){ flashBanner('Not enough coins', '#ff5a7a'); return; }
+      if(acctMode){
+        if(connected&&ws&&ws.readyState===1) ws.send(JSON.stringify({t:'buycheat', id:c.id, qty}));
+        else flashBanner('Join a game to buy cheats on your account', '#9fb0aa');
+        return;
+      }
+      store.coins-=c.cost*qty; store.cheats[c.id]=(store.cheats[c.id]||0)+qty;
+      store.coinsSpent=(store.coinsSpent||0)+c.cost*qty; saveStore(store);
+      if(store.coinsSpent>=10000) awardTrophy('bigspender');
+      renderCheats(); refreshCoinUI(); renderCheatBar();
     });
     refreshCoinUI();
   }

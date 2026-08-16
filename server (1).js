@@ -1613,16 +1613,19 @@ function broadcastState() {
 function send(ws, obj) { try { ws.send(JSON.stringify(obj)); } catch (_) {} }
 
 // ---- HTTP (serves the client) + WS -----------------------------------------
+// Only the game page is served. Everything else (server.js, accounts.json,
+// owned-names.json, package.json...) stays private — critical now that we hold
+// password hashes on disk.
+const STATIC_OK = new Set(['/index.html']);
 const server = http.createServer((req, res) => {
   if (req.url === '/favicon.ico') { res.writeHead(204); return res.end(); }
-  let p = req.url === '/' ? '/index.html' : req.url.split('?')[0];
+  const p = req.url === '/' ? '/index.html' : req.url.split('?')[0];
+  if (!STATIC_OK.has(p)) { res.writeHead(404); return res.end('Not found'); }
   const file = path.join(__dirname, p);
   if (!file.startsWith(__dirname)) { res.writeHead(403); return res.end(); }
   fs.readFile(file, (err, data) => {
     if (err) { res.writeHead(404); return res.end('Not found'); }
-    const ext = path.extname(file);
-    const mime = ext === '.html' ? 'text/html' : ext === '.js' ? 'text/javascript' : 'text/plain';
-    res.writeHead(200, { 'Content-Type': mime });
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     res.end(data);
   });
 });
@@ -1733,13 +1736,16 @@ wss.on('connection', (ws) => {
     // Menu-screen side leaderboards: answer standings for anyone (even before
     // they've joined a game), read from the always-populated Classic room.
     if (m.t === 'menuboard') {
+      // Persistent player stats (accounts) + live CPU kills, so a player's
+      // kills/wins stay on the board even after they leave the game.
       const room = rooms['classic'];
-      const list = room ? [...room.entities.values()] : [];
-      const winMap = (room && room.wins) || {};
-      const rows = list.map(e => ({
-        n: e.name, c: e.color, b: e.isBot ? 1 : 0,
-        k: e.kills || 0, w: winMap[(e.name || '').toLowerCase()] || 0,
-      }));
+      const rows = [];
+      if (room) for (const e of room.entities.values())
+        if (e.isBot) rows.push({ n: e.name, c: e.color, b: 1, k: e.kills || 0, w: 0 });
+      for (const k of Object.keys(accounts)) {
+        const a = accounts[k];
+        rows.push({ n: a.name || k, c: a.color || '#ffd23f', b: 0, k: a.kills || 0, w: a.wins || 0 });
+      }
       const kills = [...rows].sort((a, b) => b.k - a.k || b.w - a.w).slice(0, 8);
       const wins = [...rows].sort((a, b) => b.w - a.w || b.k - a.k).slice(0, 8);
       send(ws, { t: 'menuboard', kills, wins });
@@ -1762,6 +1768,20 @@ wss.on('connection', (ws) => {
         send(ws, { t: 'nameReject', reason: verdict.reason, message: verdict.message });
         return;
       }
+      // AUTH: sign up (new account), log in (existing), or guest (no account).
+      const auth = (m.auth === 'login' || m.auth === 'signup') ? m.auth : 'guest';
+      const pass = ('' + (m.pass || m.pin || '')).trim().slice(0, 64);
+      const akey = normalizeName(nm || 'Player').toLowerCase();
+      if (auth === 'signup') {
+        if (pass.length < 4) { send(ws, { t: 'authReject', reason: 'shortpass', message: 'Password must be at least 4 characters.' }); return; }
+        if (accounts[akey]) { send(ws, { t: 'authReject', reason: 'taken', message: 'That username is taken — try logging in.' }); return; }
+      } else if (auth === 'login') {
+        if (!accounts[akey]) { send(ws, { t: 'authReject', reason: 'nouser', message: 'No account with that name — sign up first.' }); return; }
+        if (accounts[akey].pin !== pinHash(pass)) { send(ws, { t: 'authReject', reason: 'wrongpass', message: 'Wrong password.' }); return; }
+      } else if (accounts[akey]) {
+        send(ws, { t: 'authReject', reason: 'registered', message: 'That name is registered — log in or pick another.' }); return;
+      }
+
       player = spawnEntity({ isBot: false, name: nm || 'Player', loadout: m.loadout, mode });
       if (!player) { send(ws, { t: 'full' }); return; }   // no free id (very unlikely)
       player.ws = ws;
@@ -1769,24 +1789,19 @@ wss.on('connection', (ws) => {
       player.skin = (typeof m.skin === 'string') ? m.skin.slice(0, 24) : 'default';
       if (mode === 'teams') pairIntoTeam(player);
       player.lastInput = Date.now();
-      // ACCOUNTS: a PIN turns this name into a server-side account.
-      const pin = ('' + (m.pin || '')).trim().slice(0, 24);
-      if (pin.length >= 4) {
-        const key = normalizeName(nm || 'Player').toLowerCase();
-        const hp = pinHash(pin);
-        if (accounts[key] && accounts[key].pin !== hp) {
-          send(ws, { t: 'nameReject', reason: 'pin', message: 'Wrong password for this name. 🔑' });
-          teamDepart(player); entities.delete(player.id); player = null; return;
-        }
-        if (!accounts[key]) {
-          accounts[key] = { pin: hp, coins: 3000, kills: 0, wins: 0, cheats: {}, lastDaily: '' };
-        }
-        player.account = key;
-        const a = accounts[key];
+
+      if (auth === 'signup') {
+        accounts[akey] = { pin: pinHash(pass), name: nm, color: player.color,
+                           coins: 3000, kills: 0, wins: 0, cheats: {}, lastDaily: '' };
+      }
+      if (auth !== 'guest') {
+        player.account = akey;
+        const a = accounts[akey];
+        a.name = nm; if (!a.color) a.color = player.color;   // keep display name/color fresh
         const today = new Date().toDateString();
         if (a.lastDaily !== today) { a.lastDaily = today; a.coins = Math.min(100000000, a.coins + 500); }
         saveAccounts();
-        send(ws, { t: 'acct', coins: a.coins, kills: a.kills, wins: a.wins, cheats: a.cheats });
+        send(ws, { t: 'acct', coins: a.coins, kills: a.kills, wins: a.wins, cheats: a.cheats, name: nm });
       }
       // client-reported coin balance for the teams leaderboard (self-reported;
       // clamped to sane bounds — see honesty note: no accounts yet)
@@ -1805,8 +1820,10 @@ wss.on('connection', (ws) => {
     if (m.t === 'buycheat') {
       const a = acctOf(player); const cost = CHEAT_PRICES[m.id];
       if (!a || !cost) { send(ws, { t: 'buycheatResult', ok: false }); return; }
-      if ((a.coins || 0) < cost) { send(ws, { t: 'buycheatResult', ok: false, reason: 'poor', coins: a.coins }); return; }
-      a.coins -= cost; a.cheats[m.id] = (a.cheats[m.id] || 0) + 1; saveAccounts();
+      let qty = Math.max(1, Math.min(99, Math.floor(Number(m.qty) || 1)));
+      qty = Math.min(qty, Math.floor((a.coins || 0) / cost));   // only what they can afford
+      if (qty < 1) { send(ws, { t: 'buycheatResult', ok: false, reason: 'poor', coins: a.coins }); return; }
+      a.coins -= cost * qty; a.cheats[m.id] = (a.cheats[m.id] || 0) + qty; saveAccounts();
       send(ws, { t: 'buycheatResult', ok: true, id: m.id, coins: a.coins, cheats: a.cheats });
       return;
     }
