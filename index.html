@@ -90,6 +90,24 @@
     border-radius:999px;padding:8px 16px;font-weight:700;color:#7a5b15;z-index:2;box-shadow:0 6px 18px rgba(120,110,90,.15);}
   .coinIcon{color:#f5b301;}
   .menurow{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:10px;}
+  /* menu side leaderboards — fill the empty gutters beside the centered card */
+  .sideboard{position:absolute;top:50%;transform:translateY(-50%);width:min(230px,20vw);
+    z-index:1;background:rgba(20,34,31,.55);border:1px solid rgba(255,255,255,.08);
+    border-radius:18px;padding:14px 14px 12px;backdrop-filter:blur(10px);
+    box-shadow:0 20px 50px rgba(0,0,0,.35);color:#dfeae6;text-align:left;}
+  #lbKills{right:calc(50% + 258px);}
+  #lbWins{left:calc(50% + 258px);}
+  .sideboard h3{margin:0 0 10px;font-size:11px;letter-spacing:.16em;text-transform:uppercase;
+    color:#9fb0aa;font-weight:700;}
+  .sb-rows{display:flex;flex-direction:column;gap:4px;}
+  .sb-row{display:flex;align-items:center;gap:8px;font-size:12.5px;padding:2px 0;}
+  .sb-row .rk{width:14px;text-align:right;color:#8a9691;font-weight:700;font-variant-numeric:tabular-nums;}
+  .sb-row .dt{width:10px;height:10px;border-radius:3px;flex:0 0 auto;}
+  .sb-row .nm{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .sb-row .bt{font-size:9px;color:#8a9691;margin-left:3px;}
+  .sb-row .vl{color:#ffd23f;font-weight:700;font-variant-numeric:tabular-nums;}
+  .sb-empty{color:#8a9691;font-size:12px;padding:6px 2px;}
+  @media (max-width:1160px){ .sideboard{display:none!important;} }
   button.ghost{flex:1 1 42%;min-width:0;background:rgba(255,255,255,.1);color:#dfeae6;
     border:1px solid rgba(255,255,255,.14);box-shadow:none;font-weight:700;}
   button.ghost:hover{filter:none;background:rgba(255,255,255,.18);color:#ffd23f;}
@@ -515,6 +533,8 @@
 <div id="joinScreen" class="screen">
   <canvas id="menuFx"></canvas>
   <div class="coinbar" id="coinBar"><span class="coinIcon">●</span> <span id="coinAmt">0</span></div>
+  <div id="lbKills" class="sideboard hidden"><h3>⚔ Top Kills</h3><div class="sb-rows" id="lbKillsRows"></div></div>
+  <div id="lbWins" class="sideboard hidden"><h3>🏅 Top Wins</h3><div class="sb-rows" id="lbWinsRows"></div></div>
   <div class="joinwrap">
     <div class="inner">
       <div class="logo3d" aria-label="Paper">
@@ -535,7 +555,7 @@
           <span class="mi">👑</span><span class="mt">Battle Royale</span><span class="md">One life · last wins</span>
         </button>
         <button class="modeopt" data-mode="3d">
-          <span class="mi">🧊</span><span class="mt">3D</span><span class="md">Chase cam · classic rules</span>
+          <span class="mi">🧊</span><span class="mt">3D</span><span class="md">Top-down · classic rules</span>
         </button>
         <button class="modeopt" data-mode="teams">
           <span class="mi">🤝</span><span class="mt">Teams</span><span class="md">2v2 · shared land</span>
@@ -885,8 +905,9 @@
   saveStore(store);
   Sound.setVolume(store.volume);
   document.body.classList.toggle('lowgfx', !!store.lowGfx);
+  let acctMode = false;         // PIN account: the server owns my coin balance (declared early: addCoins() reads it during the daily-bonus block at load)
   // DAILY LOGIN BONUS: +500 coins the first time you open the game each day.
-  (function dailyBonus(){
+  function dailyBonus(){
     const today = new Date().toDateString();
     if (store.dailyAt !== today){
       // LOGIN STREAK: consecutive days grow the bonus (500 + 100/day, cap 1500);
@@ -903,7 +924,7 @@
       // DAILY FREE CRATE: one random skin chance per day
       setTimeout(()=>{ openCrate(true); }, 1800);
     }
-  })();
+  }
 
   let lastCoinReport = 0;
   function reportCoins(){
@@ -1003,6 +1024,7 @@
   // ---- WS ----
   let coinMult = 1;                     // tripled by the Magnet Surge cheat mid-match
   function connect(name){
+    closeMenuBoard();
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     ws = new WebSocket(`${proto}://${location.host}`);
     // apply client-side power-up effects for this match
@@ -1190,7 +1212,6 @@
   let boostedThisLife = false;  // did I boost this life (for Untouchable)
   let cutThisRound = false;     // was I cut this round (for Flawless)
   let winStreakLive = 0;        // consecutive round wins this session (🔥 flames)
-  let acctMode = false;         // PIN account: the server owns my coin balance
   // ---- MOBILE TOUCH CONTROLS ----
   (function pad(){
     const dirs={padN:'N',padS:'S',padW:'W',padE:'E'};
@@ -1198,13 +1219,7 @@
       const b=document.getElementById(id); if(!b) continue;
       b.addEventListener('touchstart',ev=>{ ev.preventDefault();
         if(!connected||isDead||!ws||ws.readyState!==1) return;
-        if(activeMode==='3d'){
-          // chase cam: ◀ ▶ turn relative; ▲ ▼ ignored
-          const me=ents.get(myId);
-          if(me&&me.h&&(d==='W'||d==='E')){
-            ws.send(JSON.stringify({t:'turn',d:HEAD_ORDER[(HEAD_ORDER.indexOf(me.h)+(d==='E'?1:3))%4]}));
-          }
-        } else ws.send(JSON.stringify({t:'turn',d}));
+        ws.send(JSON.stringify({t:'turn',d}));
       },{passive:false});
     }
     const bb=document.getElementById('boostBtn');
@@ -1285,22 +1300,8 @@
       if(store.chatSent>=25) awardTrophy('social');
       e.preventDefault(); return;
     }
-    // 3D chase cam: left/right turn RELATIVE to your heading (like a snake
-    // game). Absolute N/S/E/W steering would be disorienting behind the player.
-    if (activeMode==='3d'){
-      let rel = null;
-      if (e.code==='ArrowLeft'||e.code==='KeyA') rel = 3;        // turn left
-      else if (e.code==='ArrowRight'||e.code==='KeyD') rel = 1;  // turn right
-      if (rel!==null){
-        const me = ents.get(myId);
-        if (me && me.h && connected && ws && ws.readyState===1){
-          const d = HEAD_ORDER[(HEAD_ORDER.indexOf(me.h)+rel)%4];
-          ws.send(JSON.stringify({t:'turn', d}));
-        }
-        e.preventDefault();
-      }
-      return;                                 // up/down do nothing in 3D
-    }
+    // 3D now uses a high top-down camera (north-up), so absolute N/S/E/W
+    // steering works exactly like Classic.
     const d = KEYMAP[e.code];
     if (d && connected && ws && ws.readyState===1){ ws.send(JSON.stringify({t:'turn', d})); e.preventDefault(); }
   });
@@ -1321,16 +1322,8 @@
     // throttle so one long drag doesn't spam turns
     const now=performance.now(); if(now-lastSwipeT<90) return; lastSwipeT=now;
     if(!isDead){
-      if(activeMode==='3d'){
-        // 3D: horizontal swipe turns relative to heading; vertical swipes ignored
-        if(Math.abs(dx)>=SWIPE_MIN && Math.abs(dx)>Math.abs(dy)){
-          const me=ents.get(myId);
-          if(me && me.h){ sendTurn(HEAD_ORDER[(HEAD_ORDER.indexOf(me.h)+(dx>0?1:3))%4]); }
-        }
-      } else {
-        const d = Math.abs(dx)>Math.abs(dy) ? (dx>0?'E':'W') : (dy>0?'S':'N');
-        sendTurn(d);
-      }
+      const d = Math.abs(dx)>Math.abs(dy) ? (dx>0?'E':'W') : (dy>0?'S':'N');
+      sendTurn(d);
     }
     // reset origin so the next swipe is measured fresh from here
     tsx=t.clientX; tsy=t.clientY;
@@ -1523,7 +1516,7 @@
     renderer.setPixelRatio(store.lowGfx ? 1 : Math.min(window.devicePixelRatio||1, 2));
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x0f1d1a);
-    scene.fog = new THREE.Fog(0x0f1d1a, 50, 150);
+    scene.fog = new THREE.Fog(0x0f1d1a, 140, 380);
     const camera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.1, 400);
     scene.add(new THREE.HemisphereLight(0xffffff, 0x1c2a26, 0.95));
     const sun = new THREE.DirectionalLight(0xffffff, 0.6);
@@ -1658,11 +1651,13 @@
     const targetId=(isDead && spectateId!=null)? spectateId : myId;
     const e=ents.get(targetId), v=view.get(targetId);
     if(e && v){
-      const hv=HEAD_VEC[e.h]||[0,1];
-      three.fwd.lerp(new THREE.Vector3(hv[0],0,hv[1]),0.09).normalize();
-      const desiredPos=new THREE.Vector3(v.x - three.fwd.x*9, 6.5, v.y - three.fwd.z*9);
-      three.camPos.lerp(desiredPos,0.12);
-      const desiredLook=new THREE.Vector3(v.x + three.fwd.x*4, 1.1, v.y + three.fwd.z*4);
+      // High, near-top-down view like Classic (just rendered in 3D). The camera
+      // sits well above the player and looks down steeply; a small south offset
+      // keeps the up-vector stable and the world north-up (no rotation).
+      const CAM_H=42, CAM_BACK=11;
+      const desiredPos=new THREE.Vector3(v.x, CAM_H, v.y + CAM_BACK);
+      three.camPos.lerp(desiredPos,0.15);
+      const desiredLook=new THREE.Vector3(v.x, 0, v.y);
       three.camLook.lerp(desiredLook,0.2);
       three.camera.position.copy(three.camPos);
       three.camera.lookAt(three.camLook);
@@ -2047,6 +2042,7 @@
     document.body.classList.remove('playing');
     acctMode=false;
     brState=null;
+    openMenuBoard();
     joinScreen.classList.remove('hidden');
     statusEl.textContent='';
     refreshCoinUI();
@@ -2455,6 +2451,34 @@
       });
     });
   })();
+
+  // ---- menu side leaderboards (live from the Classic room) ----
+  let menuWS=null, menuTimer=null;
+  function pollMenuBoard(){ if(menuWS&&menuWS.readyState===1){ try{menuWS.send(JSON.stringify({t:'menuboard'}));}catch(_){}}}
+  function openMenuBoard(){
+    if(menuWS) return;
+    try{ const proto=location.protocol==='https:'?'wss://':'ws://'; menuWS=new WebSocket(proto+location.host); }
+    catch(_){ return; }
+    menuWS.onopen=()=>{ pollMenuBoard(); clearInterval(menuTimer); menuTimer=setInterval(pollMenuBoard,2500); };
+    menuWS.onmessage=(ev)=>{ try{ const m=JSON.parse(ev.data); if(m.t==='menuboard') renderMenuBoards(m.kills||[], m.wins||[]); }catch(_){}};
+    menuWS.onclose=()=>{ clearInterval(menuTimer); menuWS=null; };
+    menuWS.onerror=()=>{};
+  }
+  function closeMenuBoard(){ clearInterval(menuTimer); if(menuWS){ try{menuWS.close();}catch(_){} } menuWS=null; }
+  function sbRows(list, key){
+    if(!list.length) return '<div class="sb-empty">No players yet</div>';
+    return list.map((e,i)=>`<div class="sb-row"><span class="rk">${i+1}</span>`+
+      `<span class="dt" style="background:${e.c||'#bbb'}"></span>`+
+      `<span class="nm">${escapeHtml(e.n||'?')}${e.b?' <span class=\"bt\">CPU</span>':''}</span>`+
+      `<span class="vl">${e[key]||0}</span></div>`).join('');
+  }
+  function renderMenuBoards(kills, wins){
+    const k=document.getElementById('lbKillsRows'), w=document.getElementById('lbWinsRows');
+    if(k){ k.innerHTML=sbRows(kills,'k'); document.getElementById('lbKills').classList.remove('hidden'); }
+    if(w){ w.innerHTML=sbRows(wins,'w'); document.getElementById('lbWins').classList.remove('hidden'); }
+  }
+  openMenuBoard();
+  dailyBonus();     // run last: it calls addCoins() which needs late-declared state
 
   refreshCoinUI();
 })();

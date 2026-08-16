@@ -184,8 +184,7 @@ function getRoom(mode) {
         const a = spawnEntity({ isBot: true, mode: m });
         if (!a) break;
         joinTeam(a, a.id, null);
-        const b = spawnEntity({ isBot: true, mode: m });
-        if (b) joinTeam(b, a.id, a.color);
+        spawnTeamMate(a);                      // partner starts in the same patch
       }
     } else {
       const startBots = (m === 'br') ? BR_START_BOTS : MIN_BOTS;
@@ -428,16 +427,49 @@ function joinTeam(member, teamId, color) {
   if (color) member.color = color;
   recomputeArea(member);
 }
+// A playable cell a couple of steps from the anchor, inside its starting patch,
+// so both teammates begin in the same square.
+function teamSpawnSpot(anchor) {
+  const B = anchor.blob || SPAWN_BLOB;
+  let best = null, bestScore = Infinity;
+  for (let dy = -B; dy <= B; dy++)
+    for (let dx = -B; dx <= B; dx++) {
+      const x = anchor.cx + dx, y = anchor.cy + dy;
+      if (!inBounds(x, y)) continue;
+      const score = Math.abs((Math.abs(dx) + Math.abs(dy)) - 2);
+      if (score < bestScore) { bestScore = score; best = { cx: x, cy: y }; }
+    }
+  return best;
+}
+function spawnTeamMate(anchor) {
+  const spot = teamSpawnSpot(anchor);
+  const mate = spawnEntity({ isBot: true, mode: 'teams', at: spot });
+  if (mate) joinTeam(mate, tid(anchor), anchor.color);
+  return mate;
+}
 function pairIntoTeam(p) {
   // a solo human = human with no living-or-dead partner entity present
   for (const o of entities.values()) {
     if (o.isBot || o.id === p.id) continue;
-    if (o.team && !teammateOf(o)) { joinTeam(p, tid(o), o.color); return; }
+    if (o.team && !teammateOf(o)) {
+      // Move the joining human into their partner's starting patch so both
+      // teammates begin in the same square. Release the joiner's own starter
+      // blob first (they haven't joined the team yet, so tid(p) === p.id).
+      releaseTerritory(p);
+      const spot = teamSpawnSpot(o);
+      if (spot) {
+        p.cx = spot.cx; p.cy = spot.cy; p.px = spot.cx + 0.5; p.py = spot.cy + 0.5;
+        p.heading = headingTowardCenter(p.cx, p.cy);
+        p.trailCells.length = 0; p.isOutside = false;
+      }
+      joinTeam(p, tid(o), o.color);
+      paintSpawnBlob(p); recomputeArea(p);
+      return;
+    }
   }
   // no solo human waiting: anchor a fresh team and spawn a bot partner
   joinTeam(p, p.id, null);
-  const mate = spawnEntity({ isBot: true, mode: 'teams' });
-  if (mate) joinTeam(mate, p.id, p.color);
+  spawnTeamMate(p);
 }
 // When a team member leaves the room permanently, the grid must never keep a
 // territory id that allocId() could recycle. Migrate the blob to the survivor
@@ -457,9 +489,8 @@ function teamDepart(p) {
   mate.team = mate.id;
   if (oldT !== mate.id) transferTerritory(oldT, mate.id);
   recomputeArea(mate);
-  // give the survivor a fresh bot partner
-  const nb = spawnEntity({ isBot: true, mode: 'teams' });
-  if (nb) joinTeam(nb, mate.id, mate.color);
+  // give the survivor a fresh bot partner, in the survivor's patch
+  spawnTeamMate(mate);
 }
 
 // Entity IDs are stored in Uint8Array grids, so they MUST stay in 1..255.
@@ -475,7 +506,7 @@ function allocId() {
   return 0;  // 255 entities live at once should never happen (ROOM_CAP per room)
 }
 
-function spawnEntity({ isBot, name, loadout, mode }) {
+function spawnEntity({ isBot, name, loadout, mode, at }) {
   const id = allocId();
   if (id === 0) {  // safety: no free id (shouldn't happen) — refuse to spawn
     return null;
@@ -483,7 +514,8 @@ function spawnEntity({ isBot, name, loadout, mode }) {
   // Bigger starting blob if the "head start" power-up is equipped.
   const lo = sanitizeLoadout(loadout);
   const blob = lo.includes('head') ? POWERUPS.head.startBlob : SPAWN_BLOB;
-  const { cx, cy } = findSpawn(id, blob);
+  // `at` lets a teammate spawn inside the anchor's shared starting patch.
+  const { cx, cy } = (at && inBoundsRaw(at.cx, at.cy)) ? { cx: at.cx, cy: at.cy } : findSpawn(id, blob);
   const shieldMs = lo.includes('shield') ? POWERUPS.shield.shieldMs
                  : lo.includes('guard') ? POWERUPS.guard.shieldMs : 0;
   const e = {
@@ -1230,8 +1262,7 @@ function maintainBots() {
     // Every human must have a partner (replace a lost bot mate)...
     for (const e of [...entities.values()]) {
       if (!e.isBot && e.team && !teammateOf(e) && entities.size + 1 <= ROOM_CAP) {
-        const nb = spawnEntity({ isBot: true, mode: 'teams' });
-        if (nb) joinTeam(nb, tid(e), e.color);
+        spawnTeamMate(e);
       }
     }
     // ...and keep at least 3 full BOT teams as rivals.
@@ -1242,8 +1273,7 @@ function maintainBots() {
       const a = spawnEntity({ isBot: true, mode: 'teams' });
       if (!a) break;
       joinTeam(a, a.id, null);
-      const b = spawnEntity({ isBot: true, mode: 'teams' });
-      if (b) joinTeam(b, a.id, a.color);
+      spawnTeamMate(a);
     }
     return;
   }
@@ -1585,6 +1615,22 @@ wss.on('connection', (ws) => {
     } catch (_) { return; }
     let m;
     try { m = JSON.parse(raw); } catch (_) { return; }
+
+    // Menu-screen side leaderboards: answer standings for anyone (even before
+    // they've joined a game), read from the always-populated Classic room.
+    if (m.t === 'menuboard') {
+      const room = rooms['classic'];
+      const list = room ? [...room.entities.values()] : [];
+      const winMap = (room && room.wins) || {};
+      const rows = list.map(e => ({
+        n: e.name, c: e.color, b: e.isBot ? 1 : 0,
+        k: e.kills || 0, w: winMap[(e.name || '').toLowerCase()] || 0,
+      }));
+      const kills = [...rows].sort((a, b) => b.k - a.k || b.w - a.w).slice(0, 8);
+      const wins = [...rows].sort((a, b) => b.w - a.w || b.k - a.k).slice(0, 8);
+      send(ws, { t: 'menuboard', kills, wins });
+      return;
+    }
 
     if (m.t === 'join') {
       if (player) return;  // already joined
