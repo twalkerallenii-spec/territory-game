@@ -51,8 +51,8 @@
     background:radial-gradient(130% 130% at 50% 30%, #3a5a52 0%, #243d38 55%, #1a2c28 100%);
     overflow:hidden;}
   #menuFx{position:absolute;inset:0;width:100%;height:100%;z-index:0;}
-  .joinwrap{position:relative;width:min(480px,92vw);z-index:1;}
-  .inner{position:relative;z-index:1;width:100%;padding:30px 32px 28px;text-align:center;
+  .joinwrap{position:relative;width:min(460px,92vw);max-height:96vh;z-index:1;display:flex;}
+  .inner{position:relative;z-index:1;width:100%;max-height:96vh;overflow-y:auto;padding:20px 30px 18px;text-align:center;
     background:rgba(20,34,31,.55);border:1px solid rgba(255,255,255,.08);border-radius:24px;
     box-shadow:0 30px 70px rgba(0,0,0,.4), inset 0 1px 0 rgba(255,255,255,.08);backdrop-filter:blur(10px);}
   .logo3d{display:flex;justify-content:center;gap:2px;margin-bottom:4px;}
@@ -64,10 +64,9 @@
   .logo3d .L[data-letter]{cursor:pointer;}
   .logo3d .L.lit{color:#ffd23f;text-shadow:0 3px 0 #c79a18,0 5px 0 #a8810f,0 7px 12px rgba(0,0,0,.5);}
   @keyframes drop{from{opacity:0;transform:translateY(-26px) rotate(-8deg);}to{opacity:1;transform:translateY(0) rotate(0);}}
-  .sub{color:#c3d2cc;font-size:13px;margin:8px 0 20px;line-height:1.6;}
-  .modepick{display:flex;gap:10px;margin-bottom:14px;}
-  .modepick{flex-wrap:wrap;}
-  .modeopt{flex:1 1 30%;min-width:100px;background:rgba(255,255,255,.06);border:2px solid transparent;border-radius:14px;
+  .sub{color:#c3d2cc;font-size:12.5px;margin:6px 0 10px;line-height:1.45;}
+  .modepick{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-bottom:14px;}
+  .modeopt{min-width:0;background:rgba(255,255,255,.06);border:2px solid transparent;border-radius:14px;
     padding:12px 8px;display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;
     color:#dfeae6;transition:all .15s ease;box-shadow:none;pointer-events:auto;}
   .modeopt:hover{background:rgba(255,255,255,.1);}
@@ -82,7 +81,7 @@
     color:#fff;font:inherit;font-weight:700;font-size:15px;cursor:pointer;letter-spacing:.04em;
     pointer-events:auto;transition:transform .08s ease,filter .15s ease;box-shadow:0 6px 16px rgba(255,90,122,.3);}
   button:hover{filter:brightness(1.05);} button:active{transform:translateY(1px);}
-  .hint{margin-top:18px;font-size:11px;color:var(--muted);letter-spacing:.04em;line-height:1.7;}
+  .hint{margin-top:8px;font-size:11px;color:var(--muted);letter-spacing:.04em;line-height:1.5;}
   .hidden{display:none!important;}
   .deathreason{font-size:12px;color:var(--accent);letter-spacing:.1em;text-transform:uppercase;margin-bottom:6px;}
 
@@ -90,11 +89,11 @@
   .coinbar{position:absolute;top:18px;right:20px;background:rgba(255,255,255,.9);border:1px solid var(--line);
     border-radius:999px;padding:8px 16px;font-weight:700;color:#7a5b15;z-index:2;box-shadow:0 6px 18px rgba(120,110,90,.15);}
   .coinIcon{color:#f5b301;}
-  .menurow{display:flex;flex-wrap:wrap;gap:10px;margin-top:12px;}
+  .menurow{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:10px;}
   button.ghost{flex:1 1 42%;min-width:0;background:rgba(255,255,255,.1);color:#dfeae6;
     border:1px solid rgba(255,255,255,.14);box-shadow:none;font-weight:700;}
   button.ghost:hover{filter:none;background:rgba(255,255,255,.18);color:#ffd23f;}
-  #loadoutHint{color:#ffd23f;min-height:14px;}
+  #loadoutHint{color:#ffd23f;min-height:0;margin-top:6px;}
 
   /* modals */
   .modal{position:fixed;inset:0;z-index:20;display:flex;align-items:center;justify-content:center;
@@ -251,34 +250,36 @@
   #pinInput{flex:0 0 96px;width:96px;min-width:0;}
   /* de-cramp the whole menu: tighter rhythm so everything fits on one screen */
   #joinScreen .modepick{margin:10px 0 4px;}
-  #joinScreen .setrow{margin:8px 0 0;}
+  #joinScreen .setrow{margin:6px 0 0;}
   #joinScreen #tipLine{margin:6px 0 2px;}
-  #joinScreen #playBtn{padding:12px;margin:6px 0 8px;}
+  #joinScreen #playBtn{padding:12px;margin:6px 0 6px;}
   #joinScreen button.ghost{padding:9px 10px;font-size:12px;}
   .modeopt{padding:7px 5px;}
   .modeopt .md{display:block;}
   /* compact mode cards: 9 modes shouldn't make a skyscraper */
   .modepick{gap:8px;}
-  .modeopt{flex:1 1 31%;min-width:92px;padding:9px 6px;gap:2px;}
+  .modeopt{min-width:0;padding:8px 6px;gap:2px;}
   .modeopt .mi{font-size:18px;}
   .modeopt .mt{font-size:12px;}
   .modeopt .md{font-size:9px;line-height:1.25;}
   /* kill feed: centered under the top edge, clear of the leaderboard */
   #killFeed{left:50%;right:auto;top:96px;transform:translateX(-50%);align-items:center;}
 
-  /* CHROMEBOOK LANDSCAPE: two-column menu so nothing scrolls */
+  /* DESKTOP LANDSCAPE: a slightly roomier centered card (single column,
+     capped at 96vh and internally scrollable, so nothing ever overflows). */
   @media (min-width:1000px) and (orientation:landscape){
-    #joinScreen > div:has(#playBtn){display:grid;grid-template-columns:1.05fr 1fr;
-      column-gap:26px;row-gap:6px;width:min(920px,94vw);max-height:94vh;
-      align-content:center;}
-    #joinScreen > div:has(#playBtn) > *{grid-column:1;}
-    #joinScreen #nameRow{grid-column:1/-1;}
-    #joinScreen .modepick{grid-column:1;grid-row:span 5;margin:4px 0;}
-    #joinScreen .setrow, #joinScreen #tipLine, #joinScreen #playBtn,
-    #joinScreen .menurow{grid-column:2;}
-    #joinScreen #playBtn{margin:2px 0 6px;}
-    #joinScreen > div:has(#playBtn) > h1, #joinScreen > div:has(#playBtn) > .tagline,
-    #joinScreen > div:has(#playBtn) > .logo3d, #joinScreen > div:has(#playBtn) > p{grid-column:1/-1;}
+    .joinwrap{width:min(480px,90vw);}
+  }
+  /* SHORT SCREENS (laptops ~768px tall): tighten just enough that the whole
+     menu fits without any scroll. Taller screens keep the roomier spacing. */
+  @media (max-height:820px){
+    .inner{padding:16px 28px 16px;}
+    .logo3d .L{font-size:44px;} .logo3d .io{font-size:24px;}
+    .sub{margin:4px 0 8px;line-height:1.4;}
+    #joinScreen .modepick{margin:6px 0 4px;}
+    .modeopt{padding:6px 5px;}
+    #nameRow input, #joinScreen #playBtn{padding:10px;}
+    .hint{margin-top:6px;line-height:1.45;}
   }
   /* MOBILE TOUCH CONTROLS: D-pad + boost. Visibility: Auto (touch screens),
      or forced by the Mobile/PC toggle. */
