@@ -52,6 +52,7 @@ const PALETTE = [
 let owner = new Uint8Array(GRID_W * GRID_H);
 let trail = new Uint8Array(GRID_W * GRID_H);
 let blocked = new Uint8Array(GRID_W * GRID_H);
+let totems = [];                      // active room's totems; rebound by useRoom()
 const idx = (x, y) => y * GRID_W + x;
 const inBoundsRaw = (x, y) => x >= 0 && y >= 0 && x < GRID_W && y < GRID_H;
 const inBounds = (x, y) => inBoundsRaw(x, y) && blocked[idx(x, y)] === 0;
@@ -117,6 +118,7 @@ function makeRoom(mode) {
     trail: new Uint8Array(GRID_W * GRID_H),
     blocked: new Uint8Array(GRID_W * GRID_H),
     entities: new Map(),
+    totems: [],
     currentMap: MAP_SHAPES[0],
     botNameCursor: 0,
     roundResetting: false,
@@ -143,6 +145,7 @@ function saveActiveRoom() {
   activeRoom.roundResetting = roundResetting;
   activeRoom.freezeUntil = freezeUntil;
   activeRoom.freezeCasterId = freezeCasterId;
+  activeRoom.totems = totems;
 }function useRoom(room) {
   if (activeRoom === room) return;
   saveActiveRoom();
@@ -156,6 +159,7 @@ function saveActiveRoom() {
   roundResetting = room.roundResetting;
   freezeUntil = room.freezeUntil;
   freezeCasterId = room.freezeCasterId;
+  totems = room.totems;
 }
 
 // Mode-specific terrain applied AFTER the base map shape (tiny = cramped box).
@@ -191,6 +195,7 @@ function getRoom(mode) {
       for (let i = 0; i < startBots; i++) spawnEntity({ isBot: true, mode: m });
     }
     if (m === 'br') startBrMatch(room);
+    placeTotems();
   }
   return rooms[m];
 }
@@ -596,6 +601,80 @@ function recomputeArea(e) {
   e.area = n;
 }
 
+// ---- TOTEMS ---------------------------------------------------------------
+// Neutral objects on the map. You CAPTURE one by enclosing its tile (looping
+// around it), which makes that tile your territory. Ownership is read straight
+// from the owner grid, so cutting/stealing land transfers totems automatically.
+const TOTEM_PLAN = ['spread', 'speed', 'speed', 'slow', 'tele', 'tele']; // tele placed in pairs
+const TOTEM_SPREAD_MS = 900;     // how often a spreading totem paints
+const TOTEM_SPREAD_MAX = 8;      // max radius a spreading totem grows to
+const TOTEM_SLOW_R = 6;          // slowing-totem hazard radius (cells)
+const TOTEM_SLOW_MULT = 0.5;     // rival speed multiplier inside a slow field
+const TOTEM_SPEED_STEP = 0.05;   // +5% speed per owned speed totem
+const TOTEM_SPEED_MAX = 2;       // hard cap on the stacked speed multiplier
+const TOTEM_TELE_CD = 5000;      // per-entity teleport cooldown (ms)
+
+function placeTotems() {
+  totems = [];
+  if (!activeRoom || activeRoom.mode === 'tron') return;   // Tron has no territory to enclose
+  const placed = [];
+  const tryPlace = () => {
+    for (let tries = 0; tries < 300; tries++) {
+      const x = 6 + ((Math.random() * (GRID_W - 12)) | 0);
+      const y = 6 + ((Math.random() * (GRID_H - 12)) | 0);
+      if (!inBounds(x, y) || owner[idx(x, y)] !== 0) continue;   // neutral, playable
+      let ok = true;
+      for (const p of placed) if (Math.abs(p.x - x) + Math.abs(p.y - y) < 16) { ok = false; break; }
+      if (!ok) continue;
+      placed.push({ x, y }); return { x, y };
+    }
+    return null;
+  };
+  let pairAnchor = null, pairId = 1;
+  for (const type of TOTEM_PLAN) {
+    const p = tryPlace(); if (!p) continue;
+    const t = { x: p.x, y: p.y, type, owner: 0, spreadR: 1, spreadAt: 0, _prevOwner: 0 };
+    if (type === 'tele') {
+      t.pair = pairId;
+      if (pairAnchor == null) pairAnchor = t; else { pairAnchor = null; pairId++; }
+    }
+    totems.push(t);
+  }
+}
+
+// Ownership follows the grid; notify a human (and their teammate) on a fresh grab.
+function processTotems(now) {
+  if (!totems.length) return;
+  const spreadOwners = new Set();
+  for (const t of totems) {
+    t.owner = owner[idx(t.x, t.y)] || 0;
+    if (t.owner !== t._prevOwner) {
+      t._prevOwner = t.owner;
+      if (t.owner) {
+        const claimer = [...entities.values()].find(e => tid(e) === t.owner && !e.isBot);
+        if (claimer && claimer.ws && claimer.ws.readyState === 1) send(claimer.ws, { t: 'totemGet', ty: t.type });
+      }
+    }
+    if (t.type === 'spread') {
+      if (t.owner) {
+        if (now >= (t.spreadAt || 0)) {
+          t.spreadAt = now + TOTEM_SPREAD_MS;
+          t.spreadR = Math.min(TOTEM_SPREAD_MAX, (t.spreadR || 1) + 1);
+          const R = t.spreadR;
+          for (let dy = -R; dy <= R; dy++) for (let dx = -R; dx <= R; dx++) {
+            if (Math.abs(dx) + Math.abs(dy) > R) continue;
+            const x = t.x + dx, y = t.y + dy;
+            if (inBounds(x, y) && owner[idx(x, y)] === 0) owner[idx(x, y)] = t.owner;
+          }
+          spreadOwners.add(t.owner);
+        }
+      } else t.spreadR = 1;
+    }
+  }
+  for (const tId of spreadOwners)
+    for (const e of entities.values()) if (tid(e) === tId) recomputeArea(e);
+}
+
 // ---- DEATH (Blueprint Sec 3B) ----------------------------------------------
 // killer (optional): the entity whose trail/head caused the death. If present,
 // the victim's territory is awarded to the killer; otherwise released to neutral
@@ -732,6 +811,7 @@ function updateBrStorm() {
   for (let i = 0; i < owner.length; i++) {
     if (blocked[i] === 1) { owner[i] = 0; trail[i] = 0; }
   }
+  totems = totems.filter(t => blocked[idx(t.x, t.y)] === 0);
 }
 
 // Check for a Victory Royale: one (or zero) entities left alive.
@@ -780,6 +860,7 @@ function checkBrWin() {
     }
     room.brEnding = false;
     startBrMatch(room);
+    placeTotems();
   }, 5000);
 }
 
@@ -923,6 +1004,7 @@ function roundReset(winner) {
                      blocked: rleEncode(blocked), outline: mapOutline() });
     }
   }
+  placeTotems();
   roundResetting = false;
 }
 
@@ -1023,6 +1105,23 @@ function enterCell(e, x, y) {
   if (!inBounds(x, y)) { return; }   // wall is handled in advance() (slide, no death)
   const i = idx(x, y);
 
+  // Teleport gate: stepping onto a gate YOU'VE captured warps you to its pair.
+  if (totems.length) {
+    for (const g of totems) {
+      if (g.type === 'tele' && g.x === x && g.y === y && g.owner && g.owner === tid(e) && Date.now() >= (e.teleCd || 0)) {
+        const dest = totems.find(d => d.type === 'tele' && d.pair === g.pair && d !== g);
+        if (dest) {
+          e.teleCd = Date.now() + TOTEM_TELE_CD;
+          clearTrail(e);
+          e.cx = dest.x; e.cy = dest.y; e.px = dest.x + 0.5; e.py = dest.y + 0.5; e._frac = 0;
+          e.isOutside = owner[idx(dest.x, dest.y)] !== tid(e);
+          if (!e.isBot && e.ws && e.ws.readyState === 1) send(e.ws, { t: 'teleport' });
+          return;
+        }
+      }
+    }
+  }
+
   // TRON: the rules invert — running into ANY trail (yours or theirs) kills
   // YOU, and trails never disappear. Last lightcycle alive wins the round.
   if (e.mode === 'tron') {
@@ -1076,6 +1175,17 @@ function advance(e) {
   if (activeRoom) {
     mult *= (activeRoom.speedMult || 1);                                  // Speed mode
     if (Date.now() < (activeRoom.chaosSpeedUntil || 0)) mult *= 1.8;      // Chaos surge
+  }
+  // Totems: stack owned speed totems; get slowed inside an enemy's slow field.
+  if (totems.length) {
+    const T = tid(e); let sp = 0, slowed = false;
+    for (const t of totems) {
+      if (t.type === 'speed' && t.owner === T) sp++;
+      else if (t.type === 'slow' && t.owner && t.owner !== T &&
+               Math.abs(t.x - e.cx) + Math.abs(t.y - e.cy) <= TOTEM_SLOW_R) slowed = true;
+    }
+    if (sp) mult *= Math.min(TOTEM_SPEED_MAX, 1 + TOTEM_SPEED_STEP * sp);
+    if (slowed) mult *= TOTEM_SLOW_MULT;
   }
   let remaining = CELL_PER_TICK * mult;
   // fractional position within the current cell, measured along heading
@@ -1352,6 +1462,9 @@ function tickRoom() {
   for (const e of entities.values()) if (e.isBot && !e.dead && !(frozen && e.id !== freezeCasterId)) botThink(e);
   for (const e of entities.values()) { if (frozen && e.id !== freezeCasterId) continue; advance(e); }
 
+  // Totems: reconcile ownership from the grid, run spreading, notify captures.
+  processTotems(now);
+
   // Battle Royale: advance the storm and check for a winner.
   if (activeRoom && activeRoom.mode === 'br') {
     // Self-heal: if there's no active match but the room has entities, start one.
@@ -1490,6 +1603,7 @@ function broadcastState() {
     trail: rleEncode(trail),
     ents,
     br,
+    tot: totems.map(t => ({ x: t.x, y: t.y, ty: t.type, o: t.owner || 0, p: t.pair || 0 })),
   });
   for (const e of entities.values()) {
     if (e.ws && e.ws.readyState === 1) e.ws.send(msg);

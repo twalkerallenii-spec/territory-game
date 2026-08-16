@@ -974,7 +974,7 @@
   // D7 rotating splash tips
   const TIPS=['Cut a trail to steal ALL their land','Shift = boost · Space = respawn','Z X C V send quick emotes',
     'Own your name forever with 🔒','Tron: every trail is a wall','Chain round wins for 🔥 flames',
-    'Bounty mode: cut #1 for 5× coins','Open a Mystery Crate in Skins 📦','While dead: ◀ ▶ changes who you watch'];
+    'Bounty mode: cut #1 for 5× coins','Open a Mystery Crate in Skins 📦','While dead: ◀ ▶ changes who you watch','Loop around a totem to claim its power'];
   const tipEl=document.getElementById('tipLine');
   let tipI=(Math.random()*TIPS.length)|0;
   function nextTip(){ if(!tipEl)return; tipEl.style.opacity='0';
@@ -1115,6 +1115,8 @@
         if(mine){ const c=Math.round((m.coins||800)*coinMult); addCoins(c); flashCoins('+'+c+' Tron!'); confetti(); awardTrophy('lightcycle'); Sound.win(); }
       }
       else if (m.t==='chaosevent'){ flashBanner(m.label||'🎲 CHAOS!', '#b478ff'); Sound.cheat(); }
+      else if (m.t==='totemGet'){ const L={spread:'✴️ Spreading Totem',speed:'⚡ Speed Totem',slow:'🕸️ Slowing Totem',tele:'🌀 Teleport Gate'}; flashBanner((L[m.ty]||'Totem')+' captured!', '#ffd23f'); Sound.capture(); }
+      else if (m.t==='teleport'){ Sound.boost(); flashBanner('🌀 Teleported!', '#b478ff'); }
     };
   }
 
@@ -1134,12 +1136,14 @@
     for (const id of [...ents.keys()]) if(!seen.has(id)){ ents.delete(id); view.delete(id); }
     stateDirty3D = true;
     brState = m.br || null;
+    totemList = m.tot || [];
     updateHud();
     updateBoostMeter();
     updateStormHud();
     drawMinimap();
   }
   let brState = null;
+  let totemList = [];
 
   // Fortnite-style storm HUD: countdown + alive count
   function updateStormHud(){
@@ -1543,6 +1547,7 @@
     three = {
       renderer, scene, camera, cells, dummy: new THREE.Object3D(), icol: new THREE.Color(),
       meshes: new Map(),                       // id -> {group, body, sprite}
+      totemMeshes: new Map(),                  // totem index -> {group, body}
       camPos: new THREE.Vector3(GW/2, 40, GH/2),
       camLook: new THREE.Vector3(GW/2, 0, GH/2),
       fwd: new THREE.Vector3(0,0,1),
@@ -1643,10 +1648,40 @@
     }
   }
 
+  function makeIconSprite(txt){
+    const c=document.createElement('canvas'); c.width=c.height=64;
+    const g=c.getContext('2d'); g.font='44px serif'; g.textAlign='center'; g.textBaseline='middle';
+    g.fillText(txt,32,36);
+    const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(c),depthTest:false}));
+    sp.scale.set(2.2,2.2,1);
+    return sp;
+  }
+  function sync3DTotems(){
+    if(!three) return;
+    const EM={spread:'✴️',speed:'⚡',slow:'🕸️',tele:'🌀'};
+    const seen=new Set();
+    for(let i=0;i<totemList.length;i++){
+      const t=totemList[i]; seen.add(i);
+      let m=three.totemMeshes.get(i);
+      if(!m){
+        const group=new THREE.Group();
+        const body=new THREE.Mesh(new THREE.CylinderGeometry(0.35,0.55,2.4,6),
+          new THREE.MeshLambertMaterial({color:0x9aa9a9}));
+        body.position.y=1.2;
+        const sprite=makeIconSprite(EM[t.ty]||'★'); sprite.position.y=3.0;
+        group.add(body); group.add(sprite);
+        three.scene.add(group); m={group,body}; three.totemMeshes.set(i,m);
+      }
+      m.group.position.set(t.x+0.5,0,t.y+0.5);
+      m.body.material.color.set(t.o?(colorCache[t.o]||'#ffffff'):'#9aa9a9');
+    }
+    for(const [i,m] of three.totemMeshes){ if(!seen.has(i)){ three.scene.remove(m.group); three.totemMeshes.delete(i); } }
+  }
   function render3D(){
     if(!three) return;
     if(stateDirty3D){ paint3D(); stateDirty3D=false; }
     sync3DEntities();
+    sync3DTotems();
     // chase cam: sit behind the player (or whoever we're spectating), look ahead
     const targetId=(isDead && spectateId!=null)? spectateId : myId;
     const e=ents.get(targetId), v=view.get(targetId);
@@ -1801,6 +1836,28 @@
     // --- map border (paper edge) ---
     ctx.strokeStyle='rgba(120,110,90,0.5)';ctx.lineWidth=3;
     ctx.strokeRect(ox,oy,GW*cs,GH*cs);
+
+    // --- totems: capturable power objects (loop around one to claim it) ---
+    if(totemList.length){
+      const EM={spread:'✴️',speed:'⚡',slow:'🕸️',tele:'🌀'};
+      for(const t of totemList){
+        if(t.x<x0-1||t.x>x1+1||t.y<y0-1||t.y>y1+1) continue;
+        const sx=ox+(t.x+0.5)*cs, sy=oy+(t.y+0.5)*cs, R=cs*0.55;
+        const owned=t.o!==0, col=owned?colorOf(t.o):'#8a9691';
+        if(t.ty==='slow' && owned){                       // slow field footprint
+          ctx.save(); ctx.globalAlpha=0.12; ctx.fillStyle=col;
+          ctx.beginPath(); ctx.arc(sx,sy,6*cs,0,Math.PI*2); ctx.fill(); ctx.restore();
+        }
+        ctx.save();
+        ctx.beginPath(); ctx.arc(sx,sy,R,0,Math.PI*2);
+        ctx.fillStyle=owned?col:'rgba(28,42,38,0.9)'; ctx.fill();
+        ctx.lineWidth=owned?3:2; ctx.strokeStyle=owned?'#fff':'rgba(255,255,255,0.55)';
+        if(owned){ const p=0.5+0.5*Math.sin(performance.now()/250); ctx.globalAlpha=0.6+0.4*p; }
+        ctx.stroke(); ctx.restore();
+        ctx.font=(R*1.2|0)+'px serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+        ctx.fillText(EM[t.ty]||'★', sx, sy+1); ctx.textBaseline='alphabetic';
+      }
+    }
 
     // --- avatars: rounded square in the player's color, with a little face ---
     for(const [id,e] of ents){
