@@ -2003,12 +2003,12 @@
     const nowF=performance.now(), frozen=nowF<hitstopUntil;
     if(!frozen) for(const [id,e] of ents){
       const v=view.get(id); if(!v)continue;
-      v.x=lerp(v.x,e.x,0.4); v.y=lerp(v.y,e.y,0.4);
+      v.x=lerp(v.x,e.x,0.5); v.y=lerp(v.y,e.y,0.5);
     }
     // camera follows me — or my killer while I'm spectating
     const camTargetId = (isDead && spectateId!=null) ? spectateId : myId;
     const tgt = view.get(camTargetId) || view.get(myId);
-    if(tgt){ camX=lerp(camX,tgt.x,0.14); camY=lerp(camY,tgt.y,0.14); }
+    if(tgt){ camX=lerp(camX,tgt.x,0.16); camY=lerp(camY,tgt.y,0.16); }
     try{ window.__dbg={cx:camX,cy:camY,px:tgt?tgt.x:0,py:tgt?tgt.y:0,t:performance.now()}; }catch(e){}
     camX=Math.max(0,Math.min(GW,camX)); camY=Math.max(0,Math.min(GH,camY));
 

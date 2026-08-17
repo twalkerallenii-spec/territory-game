@@ -766,8 +766,8 @@ const TOTEM_SPREAD_MS = 900;     // how often a spreading totem paints
 const TOTEM_SPREAD_MAX = 8;      // max radius a spreading totem grows to
 const TOTEM_SLOW_R = 6;          // slowing-totem hazard radius (cells)
 const TOTEM_SLOW_MULT = 0.5;     // rival speed multiplier inside a slow field
-const TOTEM_SPEED_STEP = 0.05;   // +5% speed per owned speed totem
-const TOTEM_SPEED_MAX = 2;       // hard cap on the stacked speed multiplier
+const TOTEM_SPEED_MULT = 1.5;    // each owned speed totem multiplies speed x1.5 (stacks)
+const TOTEM_SPEED_MAX = 8;       // sanity cap so movement stays controllable
 const TOTEM_TELE_CD = 5000;      // per-entity teleport cooldown (ms)
 
 function placeTotems() {
@@ -1387,7 +1387,7 @@ function advance(e) {
       else if (t.type === 'slow' && t.owner && t.owner !== T &&
                Math.abs(t.x - e.cx) + Math.abs(t.y - e.cy) <= TOTEM_SLOW_R) slowed = true;
     }
-    if (sp) mult *= Math.min(TOTEM_SPEED_MAX, 1 + TOTEM_SPEED_STEP * sp);
+    if (sp) mult *= Math.min(TOTEM_SPEED_MAX, Math.pow(TOTEM_SPEED_MULT, sp));
     if (slowed) mult *= TOTEM_SLOW_MULT;
   }
   let remaining = CELL_PER_TICK * mult;
