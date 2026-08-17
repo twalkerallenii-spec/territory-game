@@ -54,6 +54,7 @@ let owner = new Uint8Array(GRID_W * GRID_H);
 let trail = new Uint8Array(GRID_W * GRID_H);
 let blocked = new Uint8Array(GRID_W * GRID_H);
 let totems = [];                      // active room's totems; rebound by useRoom()
+let pickups = [];                     // collectible coin pickups; rebound by useRoom()
 const idx = (x, y) => y * GRID_W + x;
 const inBoundsRaw = (x, y) => x >= 0 && y >= 0 && x < GRID_W && y < GRID_H;
 const inBounds = (x, y) => inBoundsRaw(x, y) && blocked[idx(x, y)] === 0;
@@ -139,6 +140,8 @@ function makeRoom(mode) {
     blocked: new Uint8Array(GRID_W * GRID_H),
     entities: new Map(),
     totems: [],
+    pickups: [],
+    pickupAt: 0,
     currentMap: MAP_SHAPES[0],
     botNameCursor: 0,
     roundResetting: false,
@@ -170,6 +173,7 @@ function saveActiveRoom() {
   activeRoom.freezeUntil = freezeUntil;
   activeRoom.freezeCasterId = freezeCasterId;
   activeRoom.totems = totems;
+  activeRoom.pickups = pickups;
 }function useRoom(room) {
   if (activeRoom === room) return;
   saveActiveRoom();
@@ -184,6 +188,7 @@ function saveActiveRoom() {
   freezeUntil = room.freezeUntil;
   freezeCasterId = room.freezeCasterId;
   totems = room.totems;
+  pickups = room.pickups;
 }
 
 // Mode-specific terrain applied AFTER the base map shape (tiny = cramped box).
@@ -220,6 +225,7 @@ function getRoom(mode) {
     }
     if (m === 'br') startBrMatch(room);
     placeTotems();
+    placePickups();
   }
   return rooms[m];
 }
@@ -752,6 +758,25 @@ function placeTotems() {
   }
 }
 
+// ---- COIN PICKUPS (collect by driving over them) --------------------------
+const PICKUP_MAX = 8;
+const PICKUP_VAL = 120;
+function addPickup() {
+  for (let tries = 0; tries < 120; tries++) {
+    const x = 6 + ((Math.random() * (GRID_W - 12)) | 0);
+    const y = 6 + ((Math.random() * (GRID_H - 12)) | 0);
+    if (!inBounds(x, y) || owner[idx(x, y)] !== 0) continue;
+    if (pickups.some(p => p.x === x && p.y === y)) continue;
+    pickups.push({ x, y, val: PICKUP_VAL }); return true;
+  }
+  return false;
+}
+function placePickups() {
+  pickups = [];
+  if (!activeRoom || activeRoom.mode === 'tron') return;
+  for (let i = 0; i < PICKUP_MAX; i++) addPickup();
+}
+
 // Ownership follows the grid; notify a human (and their teammate) on a fresh grab.
 function processTotems(now) {
   if (!totems.length) return;
@@ -923,6 +948,7 @@ function updateBrStorm() {
     if (blocked[i] === 1) { owner[i] = 0; trail[i] = 0; }
   }
   totems = totems.filter(t => blocked[idx(t.x, t.y)] === 0);
+  pickups = pickups.filter(p => blocked[idx(p.x, p.y)] === 0);
 }
 
 // Check for a Victory Royale: one (or zero) entities left alive.
@@ -973,6 +999,7 @@ function checkBrWin() {
     room.brEnding = false;
     startBrMatch(room);
     placeTotems();
+    placePickups();
   }, 5000);
 }
 
@@ -1127,6 +1154,7 @@ function roundReset(winner) {
     }
   }
   placeTotems();
+  placePickups();
   roundResetting = false;
 }
 
@@ -1240,6 +1268,19 @@ function enterCell(e, x, y) {
           if (!e.isBot && e.ws && e.ws.readyState === 1) send(e.ws, { t: 'teleport' });
           return;
         }
+      }
+    }
+  }
+
+  // Coin pickup: driving over one grabs it (humans earn coins + a little XP).
+  if (pickups.length) {
+    const pi = pickups.findIndex(pk => pk.x === x && pk.y === y);
+    if (pi >= 0) {
+      const pk = pickups[pi]; pickups.splice(pi, 1);
+      if (!e.isBot) {
+        if (acctOf(e)) creditAcct(e, pk.val);
+        addXp(e, 5);
+        if (e.ws && e.ws.readyState === 1) send(e.ws, { t: 'pickup', coins: pk.val, x, y });
       }
     }
   }
@@ -1605,6 +1646,10 @@ function tickRoom() {
 
   // Totems: reconcile ownership from the grid, run spreading, notify captures.
   processTotems(now);
+  // Keep coin pickups topped up over time.
+  if (activeRoom && activeRoom.mode !== 'tron' && pickups.length < PICKUP_MAX && now >= (activeRoom.pickupAt || 0)) {
+    activeRoom.pickupAt = now + 3000; addPickup();
+  }
 
   // King of the Hill: hold the central zone with your snake to score. If exactly
   // one team is inside, they earn a point each second; contested = nobody scores.
@@ -1781,6 +1826,7 @@ function broadcastState() {
     br,
     koth,
     tot: totems.map(t => ({ x: t.x, y: t.y, ty: t.type, o: t.owner || 0, p: t.pair || 0 })),
+    pick: pickups.map(p => ({ x: p.x, y: p.y })),
   });
   for (const e of entities.values()) {
     if (e.ws && e.ws.readyState === 1) e.ws.send(msg);

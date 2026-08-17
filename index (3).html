@@ -1235,6 +1235,18 @@
         fxctx.globalAlpha=Math.max(0,p.life); fxctx.fillStyle=p.color; fxctx.font='800 17px ui-monospace,monospace'; fxctx.textAlign='center';
         fxctx.lineWidth=3; fxctx.strokeStyle='rgba(0,0,0,.35)'; fxctx.strokeText(p.text,sx,sy); fxctx.fillText(p.text,sx,sy); }
     }
+    // coin pickups (gold, glowing, pulsing)
+    if(pickupList && pickupList.length){
+      for(const pk of pickupList){ const px=W/2+(pk.x+0.5-camX)*cs, py=H/2+(pk.y+0.5-camY)*cs;
+        const pr=cs*0.42, pulse=0.72+0.28*Math.sin(now/220 + pk.x*0.6);
+        fxctx.globalAlpha=0.92;
+        if(!store.lowGfx){ fxctx.shadowColor='#ffd23f'; fxctx.shadowBlur=cs*0.8; }
+        fxctx.fillStyle='#ffd23f'; fxctx.beginPath(); fxctx.arc(px,py,pr*pulse,0,Math.PI*2); fxctx.fill();
+        fxctx.shadowBlur=0;
+        fxctx.fillStyle='#fff6c0'; fxctx.globalAlpha=0.85; fxctx.beginPath(); fxctx.arc(px-pr*0.22,py-pr*0.22,pr*0.34,0,Math.PI*2); fxctx.fill();
+        fxctx.globalAlpha=1;
+      }
+    }
     // King of the Hill zone
     if(kothState){ const hx=W/2+(kothState.cx-camX)*cs, hy=H/2+(kothState.cy-camY)*cs, rr=kothState.r*cs;
       const kc=((typeof ents!=='undefined'&&ents.get&&ents.get(kothState.leader))||{}).color||'#ffd23f';
@@ -1367,6 +1379,7 @@
       else if (m.t==='kothwin'){ Sound.win(); confetti(); flashBanner('👑 '+m.winner+' rules the hill!', '#ffd23f'); }
       else if (m.t==='totemGet'){ const L={spread:'✴️ Spreading Totem',speed:'⚡ Speed Totem',slow:'🕸️ Slowing Totem',tele:'🌀 Teleport Gate'}; flashBanner((L[m.ty]||'Totem')+' captured!', '#ffd23f'); Sound.capture(); }
       else if (m.t==='teleport'){ Sound.boost(); flashBanner('🌀 Teleported!', '#b478ff'); }
+      else if (m.t==='pickup'){ if(!acctMode) addCoins(m.coins||0); Sound.coin(); const pv=view.get(myId); if(pv){ fxBurst(pv.x,pv.y,'#ffd23f',12,3.5); fxText(pv.x,pv.y-0.5,'+'+(m.coins||0),'#ffd23f'); } }
     };
   }
 
@@ -1392,6 +1405,7 @@
     brState = m.br || null;
     totemList = m.tot || [];
     kothState = m.koth || null; if(typeof updateKothHud==='function') updateKothHud();
+    pickupList = m.pick || [];
     { const me2=ents.get(myId), vme=view.get(myId);
       if(me2 && vme){
         if(!feelReady){ myPrevKills=me2.kl||0; myPrevArea=me2.area||0; feelReady=true; }
@@ -1406,7 +1420,7 @@
             if(typeof Sound==='object'&&Sound.capture) Sound.capture();
           }
           myPrevKills=me2.kl||0;
-          if((me2.area||0)>myPrevArea+8){ shake(3); fxRing(vme.x,vme.y, (typeof skinColor==='function'&&skinColor(me2.sk))||me2.color||'#ffd23f'); }
+          if((me2.area||0)>myPrevArea+8){ fxRing(vme.x,vme.y, (typeof skinColor==='function'&&skinColor(me2.sk))||me2.color||'#ffd23f'); }
           myPrevArea=me2.area||0;
         }
       } }
@@ -1418,6 +1432,7 @@
   let brState = null;
   let totemList = [];
   let kothState = null;
+  let pickupList = [];
 
   // Fortnite-style storm HUD: countdown + alive count
   function updateStormHud(){
@@ -1591,7 +1606,7 @@
   function predictTurn(d){ const v=view.get(myId), e=ents.get(myId); if(!v||!e) return;
     const spd=Math.hypot(v.vx||0,v.vy||0)||0.006, dir=d==='N'?[0,-1]:d==='S'?[0,1]:d==='E'?[1,0]:[-1,0];
     v.vx=dir[0]*spd; v.vy=dir[1]*spd; e.h=d; }
-  function sendTurn(d){ if(connected&&ws&&ws.readyState===1){ ws.send(JSON.stringify({t:'turn',d})); predictTurn(d); } }
+  function sendTurn(d){ if(connected&&ws&&ws.readyState===1){ ws.send(JSON.stringify({t:'turn',d})); } }
   addEventListener('touchstart',e=>{
     const t=e.changedTouches[0]; tsx=t.clientX; tsy=t.clientY; tMoved=false;
   },{passive:true});
@@ -1984,21 +1999,16 @@
     ctx.clearRect(0,0,W,H);
     if(!owner){return;}
 
-    // dead-reckon each entity from its last server pos + velocity, so motion is
-    // fluid between the ~20Hz updates and your own turns feel instant.
+    // smooth interpolation toward the latest server position (stable — no jitter)
     const nowF=performance.now(), frozen=nowF<hitstopUntil;
     if(!frozen) for(const [id,e] of ents){
       const v=view.get(id); if(!v)continue;
-      const age=Math.min(130, nowF-(v.t||nowF));
-      const tx=e.x+(v.vx||0)*age, ty=e.y+(v.vy||0)*age;
-      const k=id===myId?0.6:0.45;
-      v.x=lerp(v.x,tx,k); v.y=lerp(v.y,ty,k);
+      v.x=lerp(v.x,e.x,0.4); v.y=lerp(v.y,e.y,0.4);
     }
     // camera follows me — or my killer while I'm spectating
     const camTargetId = (isDead && spectateId!=null) ? spectateId : myId;
     const tgt = view.get(camTargetId) || view.get(myId);
-    if(tgt){ const laX=(tgt.vx||0)*140, laY=(tgt.vy||0)*140;
-      camX=lerp(camX,tgt.x+laX,0.16); camY=lerp(camY,tgt.y+laY,0.16); }
+    if(tgt){ camX=lerp(camX,tgt.x,0.14); camY=lerp(camY,tgt.y,0.14); }
     camX=Math.max(0,Math.min(GW,camX)); camY=Math.max(0,Math.min(GH,camY));
 
     // 3D mode: hand off to the Three.js chase-cam renderer. HUD, minimap,
@@ -2903,6 +2913,9 @@
       for(const t of totemList){ const te=ents.get(t.o); mmCtx.fillStyle = t.o ? (te?te.color:'#ffd23f') : '#c9d2cc';
         mmCtx.fillRect(t.x*sx-1.5, t.y*sy-1.5, 3.5, 3.5); }
     }
+    // coin pickups
+    if(typeof pickupList!=='undefined' && pickupList.length){ mmCtx.fillStyle='#ffd23f';
+      for(const pk of pickupList) mmCtx.fillRect(pk.x*sx-1.5, pk.y*sy-1.5, 3, 3); }
     // King-of-the-Hill zone
     if(typeof kothState!=='undefined' && kothState){
       mmCtx.strokeStyle='#ffd23f'; mmCtx.lineWidth=1.5;
