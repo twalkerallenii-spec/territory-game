@@ -2009,6 +2009,7 @@
     const camTargetId = (isDead && spectateId!=null) ? spectateId : myId;
     const tgt = view.get(camTargetId) || view.get(myId);
     if(tgt){ camX=lerp(camX,tgt.x,0.14); camY=lerp(camY,tgt.y,0.14); }
+    try{ window.__dbg={cx:camX,cy:camY,px:tgt?tgt.x:0,py:tgt?tgt.y:0,t:performance.now()}; }catch(e){}
     camX=Math.max(0,Math.min(GW,camX)); camY=Math.max(0,Math.min(GH,camY));
 
     // 3D mode: hand off to the Three.js chase-cam renderer. HUD, minimap,

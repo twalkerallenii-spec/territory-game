@@ -378,15 +378,55 @@ const BANNED = ['fuck','shit','bitch','cunt','nigger','nigga','faggot','dick',
 
 // Owned-name registry: name -> secret token. Best-effort persistence to disk
 // (survives restarts; wiped by a redeploy — real permanence needs accounts).
-const ACCTS_FILE = path.join(__dirname, 'accounts.json');
+// ---- ACCOUNT PERSISTENCE --------------------------------------------------
+// Render's FREE tier has an EPHEMERAL disk: accounts.json is wiped whenever the
+// server sleeps (15-min idle) or redeploys, which is why accounts "disappear".
+// To persist for real, create a FREE Upstash Redis database and set two env vars
+// on Render:  UPSTASH_REDIS_REST_URL  and  UPSTASH_REDIS_REST_TOKEN
+// With those set, accounts survive every restart/deploy. With nothing set, we
+// fall back to the local file exactly as before. (DATA_DIR can point the file at
+// a mounted persistent disk if you use that route instead.)
+const KV_URL = process.env.UPSTASH_REDIS_REST_URL || '';
+const KV_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN || '';
+const KV_KEY = 'territory:accounts';
+const useKV = !!(KV_URL && KV_TOKEN);
+const ACCTS_FILE = path.join(process.env.DATA_DIR || __dirname, 'accounts.json');
 let accounts = {};
-try { accounts = JSON.parse(fs.readFileSync(ACCTS_FILE, 'utf8')) || {}; } catch (_) {}
-let acctSaveTimer = null;
-function saveAccounts() {           // throttled write
-  if (acctSaveTimer) return;
-  acctSaveTimer = setTimeout(() => { acctSaveTimer = null;
-    try { fs.writeFileSync(ACCTS_FILE, JSON.stringify(accounts)); } catch (_) {} }, 500);
+
+async function kvCmd(cmd) {
+  const res = await fetch(KV_URL, {
+    method: 'POST',
+    headers: { Authorization: 'Bearer ' + KV_TOKEN, 'Content-Type': 'application/json' },
+    body: JSON.stringify(cmd),
+  });
+  if (!res.ok) throw new Error('http ' + res.status);
+  return res.json();
 }
+async function loadAccounts() {
+  if (useKV) {
+    try {
+      const r = await kvCmd(['GET', KV_KEY]);
+      if (r && r.result) { accounts = JSON.parse(r.result) || {}; console.log('accounts: loaded ' + Object.keys(accounts).length + ' from Upstash'); return; }
+      console.log('accounts: Upstash empty — starting fresh'); return;
+    } catch (e) { console.log('accounts: Upstash load failed (' + e.message + '); using local file'); }
+  }
+  try { accounts = JSON.parse(fs.readFileSync(ACCTS_FILE, 'utf8')) || {}; } catch (_) {}
+}
+let acctSaveTimer = null;
+function saveAccounts() {            // throttled write
+  if (acctSaveTimer) return;
+  acctSaveTimer = setTimeout(() => {
+    acctSaveTimer = null;
+    const data = JSON.stringify(accounts);
+    if (useKV) { kvCmd(['SET', KV_KEY, data]).catch(() => { try { fs.writeFileSync(ACCTS_FILE, data); } catch (_) {} }); }
+    else { try { fs.writeFileSync(ACCTS_FILE, data); } catch (_) {} }
+  }, 500);
+}
+// Best-effort flush so a pending throttled write isn't lost when the host stops us.
+function flushAccountsSync() { try { fs.writeFileSync(ACCTS_FILE, JSON.stringify(accounts)); } catch (_) {} }
+process.on('SIGTERM', () => { flushAccountsSync(); process.exit(0); });
+process.on('SIGINT', () => { flushAccountsSync(); process.exit(0); });
+loadAccounts();
 function pinHash(pin) {             // LEGACY hash — kept only to verify + upgrade old accounts
   let h = 5381; const str = 'papersalt:' + pin;
   for (let i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) >>> 0;
