@@ -393,7 +393,66 @@ function acctOf(p) { return p && p.account ? accounts[p.account] : null; }
 function creditAcct(p, n) {         // server-side coin earn + push the new balance
   const a = acctOf(p); if (!a) return;
   a.coins = Math.min(100000000, (a.coins || 0) + n); saveAccounts();
-  if (p.ws && p.ws.readyState === 1) send(p.ws, { t: 'acctsync', coins: a.coins, cheats: a.cheats });
+  acctSync(p);
+}
+
+// ---- PROGRESSION: XP, levels, daily quests --------------------------------
+function xpNeededFor(level) { return 300 + (level - 1) * 150; }   // XP from `level` -> level+1
+function levelFromXp(xp) { let lvl = 1, acc = 0; while (xp >= acc + xpNeededFor(lvl)) { acc += xpNeededFor(lvl); lvl++; } return lvl; }
+function xpFloor(level) { let acc = 0; for (let l = 1; l < level; l++) acc += xpNeededFor(l); return acc; }
+function acctSync(p) {
+  const a = acctOf(p); if (!a || !p.ws || p.ws.readyState !== 1) return;
+  const lvl = a.level || 1;
+  send(p.ws, { t: 'acctsync', coins: a.coins, cheats: a.cheats, xp: a.xp || 0, level: lvl,
+               into: (a.xp || 0) - xpFloor(lvl), need: xpNeededFor(lvl), daily: (a.daily && a.daily.quests) || [] });
+}
+function addXp(p, n) {
+  const a = acctOf(p); if (!a || !n) return;
+  const before = a.level || 1;
+  a.xp = (a.xp || 0) + n; a.level = levelFromXp(a.xp);
+  saveAccounts();
+  if (p.ws && p.ws.readyState === 1 && a.level > before) send(p.ws, { t: 'levelup', level: a.level });
+  acctSync(p);
+}
+const QUEST_POOL = [
+  { id: 'kills5',  text: 'Cut 5 rivals',           goal: 5,  metric: 'kills', coins: 300, xp: 150 },
+  { id: 'kills12', text: 'Cut 12 rivals',          goal: 12, metric: 'kills', coins: 700, xp: 350 },
+  { id: 'win1',    text: 'Win a round or match',   goal: 1,  metric: 'wins',  coins: 500, xp: 300 },
+  { id: 'win2',    text: 'Win twice',              goal: 2,  metric: 'wins',  coins: 900, xp: 500 },
+  { id: 'play3',   text: 'Play 3 different modes', goal: 3,  metric: 'modes', coins: 400, xp: 200 },
+];
+function ensureDaily(a) {
+  const today = new Date().toDateString();
+  if (!a.daily || a.daily.date !== today) {
+    const pool = [...QUEST_POOL], picks = [];
+    while (picks.length < 3 && pool.length) picks.push(pool.splice((Math.random() * pool.length) | 0, 1)[0]);
+    a.daily = { date: today, modes: {}, quests: picks.map(q => ({ id: q.id, text: q.text, goal: q.goal, metric: q.metric, coins: q.coins, xp: q.xp, prog: 0, done: false })) };
+  }
+  return a.daily;
+}
+function questBump(p, metric, val, absolute) {
+  const a = acctOf(p); if (!a) return;
+  const d = ensureDaily(a); let changed = false, rewardXp = 0;
+  for (const q of d.quests) {
+    if (q.done || q.metric !== metric) continue;
+    q.prog = absolute ? val : Math.min(q.goal, q.prog + val);
+    if (q.prog >= q.goal) {
+      q.done = true; a.coins = Math.min(100000000, (a.coins || 0) + q.coins); rewardXp += q.xp;
+      if (p.ws && p.ws.readyState === 1) send(p.ws, { t: 'questDone', text: q.text, coins: q.coins, xp: q.xp });
+    }
+    changed = true;
+  }
+  if (changed) { saveAccounts(); if (rewardXp) addXp(p, rewardXp); else acctSync(p); }
+}
+
+// ---- SESSIONS (stay-logged-in tokens; in-memory, cleared on restart) -------
+const sessions = {};   // token -> account key
+function newSession(key) { const t = crypto.randomBytes(18).toString('hex'); sessions[t] = key; return t; }
+function acctPayload(a, name) {
+  const lvl = a.level || 1;
+  return { name, coins: a.coins, kills: a.kills || 0, wins: a.wins || 0, cheats: a.cheats,
+           xp: a.xp || 0, level: lvl, into: (a.xp || 0) - xpFloor(lvl), need: xpNeededFor(lvl),
+           daily: ensureDaily(a).quests };
 }
 
 const NAMES_FILE = path.join(__dirname, 'owned-names.json');
@@ -749,7 +808,7 @@ function killEntity(e, reason, killer) {
     if (!killer.isBot && killer.ws && killer.ws.readyState === 1) {
       send(killer.ws, { t: 'kill', coins, total: killer.kills, streak: killer.streak, mult: streakMult, bounty });
     }
-    const ka = acctOf(killer); if (ka) { ka.kills = (ka.kills || 0) + 1; creditAcct(killer, coins); }
+    const ka = acctOf(killer); if (ka) { ka.kills = (ka.kills || 0) + 1; creditAcct(killer, coins); addXp(killer, 12); questBump(killer, 'kills', 1); }
     // 3-kills-to-menu (Classic only): if this killer has now cut THIS victim 3+
     // times, the victim is sent back to the main menu.
     if (e.mode !== 'br' && e.mode !== 'teams' && !e.isBot) {
@@ -862,6 +921,7 @@ function checkBrWin() {
     if (e.isBot || !e.ws || e.ws.readyState !== 1) continue;
     if (winner && e.id === winner.id) {
       send(e.ws, { t: 'victory', coins: BR_COIN_WIN, placement: 1, winner: winnerName });
+      const va = acctOf(e); if (va) { va.wins = (va.wins || 0) + 1; creditAcct(e, BR_COIN_WIN); addXp(e, 120); questBump(e, 'wins', 1); }
     } else {
       send(e.ws, { t: 'brover', winner: winnerName });
     }
@@ -980,7 +1040,7 @@ function captureTerritory(e) {
     if (!e.isBot && e.ws && e.ws.readyState === 1) {
       send(e.ws, { t: 'fullmap', coins: COIN_FULL_MAP });
     }
-    const wa = acctOf(e); if (wa) { wa.wins = (wa.wins || 0) + 1; creditAcct(e, COIN_FULL_MAP); }
+    const wa = acctOf(e); if (wa) { wa.wins = (wa.wins || 0) + 1; creditAcct(e, COIN_FULL_MAP); addXp(e, 100); questBump(e, 'wins', 1); }
     // Teams: the WIN belongs to both members — reward the teammate too and
     // bump the session win counters used by the teams leaderboard.
     if (e.mode === 'teams') {
@@ -1517,6 +1577,7 @@ function tickRoom() {
       const msg = JSON.stringify({ t: 'tronwin', winner: winT ? winT.name : 'Nobody',
                                    winnerId: winT ? winT.id : 0, coins: 800 });
       for (const o of entities.values()) if (!o.isBot && o.ws && o.ws.readyState === 1) o.ws.send(msg);
+      if (winT && !winT.isBot) { const ta = acctOf(winT); if (ta) { ta.wins = (ta.wins || 0) + 1; creditAcct(winT, 800); addXp(winT, 90); questBump(winT, 'wins', 1); } }
       owner.fill(0); trail.fill(0);
       currentMap.fn(); applyModeTerrain();
       for (const o of entities.values()) {
@@ -1644,6 +1705,7 @@ function send(ws, obj) { try { ws.send(JSON.stringify(obj)); } catch (_) {} }
 const STATIC_OK = new Set(['/index.html']);
 const server = http.createServer((req, res) => {
   if (req.url === '/favicon.ico') { res.writeHead(204); return res.end(); }
+  if (req.url === '/healthz') { res.writeHead(200, { 'Content-Type': 'text/plain' }); return res.end('ok'); }
   const p = req.url === '/' ? '/index.html' : req.url.split('?')[0];
   if (!STATIC_OK.has(p)) { res.writeHead(404); return res.end('Not found'); }
   const file = path.join(__dirname, p);
@@ -1758,6 +1820,73 @@ wss.on('connection', (ws) => {
     let m;
     try { m = JSON.parse(raw); } catch (_) { return; }
 
+    // Standalone sign-up / log-in (before joining a game). Returns a session
+    // token the client stores to stay logged in and to join authenticated.
+    if (m.t === 'auth') {
+      const nm = ('' + (m.name || '')).slice(0, 16).trim();
+      const pass = ('' + (m.pass || '')).slice(0, 64);
+      const key = normalizeName(nm).toLowerCase();
+      if (!key) { send(ws, { t: 'authReject', reason: 'empty', message: 'Please enter a username.' }); return; }
+      for (const bw of BANNED) if (key.includes(bw)) { send(ws, { t: 'authReject', reason: 'inappropriate', message: 'That username isn\u2019t allowed.' }); return; }
+      if (m.mode === 'signup') {
+        if (pass.length < 4) { send(ws, { t: 'authReject', reason: 'shortpass', message: 'Password must be at least 4 characters.' }); return; }
+        if (accounts[key]) { send(ws, { t: 'authReject', reason: 'taken', message: 'That username is taken \u2014 log in instead.' }); return; }
+        accounts[key] = { pw: hashPassword(pass), name: nm, color: PALETTE[(Math.random() * PALETTE.length) | 0], coins: 3000, kills: 0, wins: 0, cheats: {}, lastDaily: '', xp: 0, level: 1 };
+        const a = accounts[key]; ensureDaily(a);
+        const today = new Date().toDateString(); if (a.lastDaily !== today) { a.lastDaily = today; a.coins = Math.min(100000000, a.coins + 500); }
+        saveAccounts();
+        send(ws, Object.assign({ t: 'authOk', mode: 'signup', token: newSession(key) }, acctPayload(a, nm)));
+        return;
+      }
+      if (m.mode === 'login') {
+        if (!accounts[key]) { send(ws, { t: 'authReject', reason: 'nouser', message: 'No account with that name \u2014 sign up first.' }); return; }
+        if (!verifyPassword(accounts[key], pass)) { send(ws, { t: 'authReject', reason: 'wrongpass', message: 'Wrong password.' }); return; }
+        const a = accounts[key]; a.name = nm; ensureDaily(a);
+        const today = new Date().toDateString(); if (a.lastDaily !== today) { a.lastDaily = today; a.coins = Math.min(100000000, a.coins + 500); }
+        saveAccounts();
+        send(ws, Object.assign({ t: 'authOk', mode: 'login', token: newSession(key) }, acctPayload(a, nm)));
+        return;
+      }
+      send(ws, { t: 'authReject', reason: 'bad', message: 'Unknown auth request.' }); return;
+    }
+    // Resume a saved session on page load.
+    if (m.t === 'resume') {
+      const key = sessions['' + (m.token || '')];
+      if (!key || !accounts[key]) { send(ws, { t: 'authExpired' }); return; }
+      const a = accounts[key];
+      const today = new Date().toDateString(); if (a.lastDaily !== today) { a.lastDaily = today; a.coins = Math.min(100000000, a.coins + 500); ensureDaily(a); saveAccounts(); }
+      send(ws, Object.assign({ t: 'authOk', mode: 'resume', token: '' + m.token }, acctPayload(a, a.name || key)));
+      return;
+    }
+    // Buy a cheat straight from the shop (menu or in-game) via session token.
+    if (m.t === 'buycheat' && m.token) {
+      const key = sessions['' + m.token];
+      if (!key || !accounts[key]) { send(ws, { t: 'buycheatResult', ok: false, reason: 'expired' }); return; }
+      const a = accounts[key], cost = CHEAT_PRICES[m.id];
+      if (!cost) { send(ws, { t: 'buycheatResult', ok: false }); return; }
+      let qty = Math.max(1, Math.min(99, Math.floor(Number(m.qty) || 1)));
+      qty = Math.min(qty, Math.floor((a.coins || 0) / cost));
+      if (qty < 1) { send(ws, { t: 'buycheatResult', ok: false, reason: 'poor', coins: a.coins }); return; }
+      a.coins -= cost * qty; a.cheats[m.id] = (a.cheats[m.id] || 0) + qty; saveAccounts();
+      send(ws, { t: 'buycheatResult', ok: true, id: m.id, coins: a.coins, cheats: a.cheats });
+      return;
+    }
+
+    // All-time global ranks (from persistent accounts).
+    if (m.t === 'globalboard') {
+      const rows = Object.keys(accounts).map(k => {
+        const a = accounts[k];
+        return { n: a.name || k, c: a.color || '#ffd23f', lvl: a.level || 1, k: a.kills || 0, w: a.wins || 0 };
+      });
+      send(ws, {
+        t: 'globalboard',
+        level: [...rows].sort((a, b) => b.lvl - a.lvl || b.k - a.k).slice(0, 10),
+        kills: [...rows].sort((a, b) => b.k - a.k).slice(0, 10),
+        wins:  [...rows].sort((a, b) => b.w - a.w).slice(0, 10),
+      });
+      return;
+    }
+
     // Menu-screen side leaderboards: answer standings for anyone (even before
     // they've joined a game), read from the always-populated Classic room.
     if (m.t === 'menuboard') {
@@ -1767,7 +1896,7 @@ wss.on('connection', (ws) => {
       // persistent players (accounts)
       for (const k of Object.keys(accounts)) {
         const a = accounts[k];
-        rows.push({ n: a.name || k, c: a.color || '#ffd23f', b: 0, k: a.kills || 0, w: a.wins || 0 });
+        rows.push({ n: a.name || k, c: a.color || '#ffd23f', b: 0, k: a.kills || 0, w: a.wins || 0, lvl: a.level || 1 });
       }
       // live CPUs (Classic) + live GUESTS in any room (no account) — these are
       // temporary and drop off the board as soon as the guest leaves the game.
@@ -1800,10 +1929,14 @@ wss.on('connection', (ws) => {
         return;
       }
       // AUTH: sign up (new account), log in (existing), or guest (no account).
-      const auth = (m.auth === 'login' || m.auth === 'signup') ? m.auth : 'guest';
+      const auth = ['login', 'signup', 'session'].includes(m.auth) ? m.auth : 'guest';
       const pass = ('' + (m.pass || m.pin || '')).trim().slice(0, 64);
-      const akey = normalizeName(nm || 'Player').toLowerCase();
-      if (auth === 'signup') {
+      let akey = normalizeName(nm || 'Player').toLowerCase();
+      if (auth === 'session') {
+        const skey = sessions['' + (m.token || '')];
+        if (!skey || !accounts[skey]) { send(ws, { t: 'authReject', reason: 'expired', message: 'Session expired \u2014 please log in again.' }); return; }
+        akey = skey;
+      } else if (auth === 'signup') {
         if (pass.length < 4) { send(ws, { t: 'authReject', reason: 'shortpass', message: 'Password must be at least 4 characters.' }); return; }
         if (accounts[akey]) { send(ws, { t: 'authReject', reason: 'taken', message: 'That username is taken — try logging in.' }); return; }
       } else if (auth === 'login') {
@@ -1832,8 +1965,13 @@ wss.on('connection', (ws) => {
         const today = new Date().toDateString();
         if (a.lastDaily !== today) { a.lastDaily = today; a.coins = Math.min(100000000, a.coins + 500); }
         saveAccounts();
-        send(ws, { t: 'acct', coins: a.coins, kills: a.kills, wins: a.wins, cheats: a.cheats, name: nm });
+        const d = ensureDaily(a); d.modes[mode] = 1;
+        a.level = levelFromXp(a.xp || 0);
+        const lvl = a.level || 1;
+        send(ws, { t: 'acct', coins: a.coins, kills: a.kills, wins: a.wins, cheats: a.cheats, name: nm,
+                   xp: a.xp || 0, level: lvl, into: (a.xp || 0) - xpFloor(lvl), need: xpNeededFor(lvl), daily: d.quests });
       }
+      if (player.account) { addXp(player, 15); const da = acctOf(player); if (da) questBump(player, 'modes', Object.keys(ensureDaily(da).modes).length, true); }
       // client-reported coin balance for the teams leaderboard (self-reported;
       // clamped to sane bounds — see honesty note: no accounts yet)
       const cn = Number(m.coins);
@@ -1877,13 +2015,12 @@ wss.on('connection', (ws) => {
     } else if (m.t === 'cheat' && !player.dead) {
       if (CHEAT_IDS.includes(m.id)) {
         const a = acctOf(player);
-        if (a) {                                   // server-enforced inventory
-          if (!a.cheats[m.id] || a.cheats[m.id] <= 0) {
-            send(ws, { t: 'cheatResult', id: m.id, ok: false, reason: 'notowned' });
-            return;
-          }
-          a.cheats[m.id]--; saveAccounts();
+        if (!a) { send(ws, { t: 'cheatResult', id: m.id, ok: false, reason: 'guest' }); return; }
+        if (!a.cheats[m.id] || a.cheats[m.id] <= 0) {
+          send(ws, { t: 'cheatResult', id: m.id, ok: false, reason: 'notowned' });
+          return;
         }
+        a.cheats[m.id]--; saveAccounts();
         const ok = applyCheat(player, m.id);
         send(ws, { t: 'cheatResult', id: m.id, ok });
       }

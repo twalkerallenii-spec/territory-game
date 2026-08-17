@@ -97,6 +97,50 @@
     box-shadow:none;font-weight:700;font-size:12.5px;letter-spacing:.02em;}
   .authtab:hover{filter:none;background:rgba(255,255,255,.08);}
   .authtab.active{background:var(--accent);color:#fff;}
+  .acctbar{display:flex;align-items:center;gap:8px;margin:2px 0 8px;padding:8px 12px;
+    background:rgba(255,255,255,.05);border-radius:12px;font-size:13px;color:#c3d2cc;}
+  #acctStatus{flex:1;text-align:left;font-weight:700;}
+  #acctBtns{display:flex;gap:6px;}
+  .acctbar button.ghost{width:auto;padding:7px 12px;font-size:12px;}
+  .authscreen{z-index:20;}
+  .authcard{position:relative;z-index:1;width:min(360px,92vw);padding:28px 26px;text-align:center;
+    background:rgba(20,34,31,.9);border:1px solid rgba(255,255,255,.1);border-radius:22px;
+    box-shadow:0 30px 70px rgba(0,0,0,.5);backdrop-filter:blur(10px);}
+  .authhead{font-size:26px;font-weight:800;color:#eef3f0;margin-bottom:18px;letter-spacing:.02em;}
+  .authinput{width:100%;margin-bottom:12px;padding:12px 14px;border-radius:10px;
+    border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.96);color:#2b2b2b;
+    font:inherit;font-size:14px;}
+  .autherr{min-height:16px;color:#ff7a7a;font-size:12px;margin-bottom:8px;font-weight:700;}
+  .authbtn{width:100%;margin-bottom:14px;}
+  .authlinks{display:flex;flex-direction:column;gap:8px;}
+  .linkbtn{width:auto;background:transparent;box-shadow:none;color:#9fc0b6;font-size:12.5px;
+    padding:4px;text-decoration:underline;}
+  .linkbtn:hover{filter:none;color:#ffd23f;}
+  .levelchip{position:absolute;top:54px;right:20px;z-index:2;display:flex;align-items:center;gap:8px;
+    background:rgba(20,34,31,.7);border:1px solid rgba(255,255,255,.12);border-radius:999px;
+    padding:6px 12px;color:#eef3f0;font-size:12px;font-weight:700;backdrop-filter:blur(6px);}
+  .lvbar{width:70px;height:6px;border-radius:3px;background:rgba(255,255,255,.15);overflow:hidden;}
+  .lvbar>span{display:block;height:100%;width:0%;background:linear-gradient(90deg,#ffd23f,#ff9f1c);transition:width .4s;}
+  .qlist{display:flex;flex-direction:column;gap:8px;max-height:52vh;overflow-y:auto;}
+  .qrow{background:rgba(255,255,255,.05);border-radius:12px;padding:10px 12px;}
+  .qrow .qt{font-size:13px;font-weight:700;color:#eef3f0;display:flex;justify-content:space-between;gap:8px;align-items:center;}
+  .qrow .qr{font-size:11px;color:#ffd23f;font-weight:700;white-space:nowrap;}
+  .qbar{margin-top:8px;height:8px;border-radius:4px;background:rgba(255,255,255,.12);overflow:hidden;}
+  .qbar>span{display:block;height:100%;background:linear-gradient(90deg,#3cd070,#1ba3a3);}
+  .qnum{font-size:11px;color:#9fb0aa;margin-top:4px;}
+  .qrow.done{opacity:.65;}
+  .qrow.done .qr::after{content:'✓ done';color:#3cd070;}
+  .ranktabs{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:2px 0 12px;
+    background:rgba(255,255,255,.05);border-radius:10px;padding:4px;}
+  .ranktab{width:auto;padding:8px;border-radius:8px;background:transparent;color:#c3d2cc;box-shadow:none;font-weight:700;font-size:12px;}
+  .ranktab:hover{filter:none;background:rgba(255,255,255,.08);}
+  .ranktab.active{background:var(--accent);color:#fff;}
+  .rrow{display:flex;align-items:center;gap:10px;padding:6px 4px;font-size:13px;}
+  .rrow .rk{width:18px;text-align:right;color:#8a9691;font-weight:700;font-variant-numeric:tabular-nums;}
+  .rrow .dt{width:10px;height:10px;border-radius:3px;flex:0 0 auto;}
+  .rrow .nm{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .rrow .lv{font-size:10px;color:#ffd23f;font-weight:700;margin-left:6px;}
+  .rrow .vl{color:#ffd23f;font-weight:700;font-variant-numeric:tabular-nums;}
   /* menu side leaderboards — fill the empty gutters beside the centered card */
   .sideboard{position:absolute;top:50%;transform:translateY(-50%);width:min(230px,20vw);
     z-index:1;background:rgba(20,34,31,.55);border:1px solid rgba(255,255,255,.08);
@@ -272,7 +316,6 @@
      (the base button rule is width:100%, so 'auto' meant 'card-wide') */
   #nameInput{min-width:0;}
   #diceBtn.ghost,#ownNameBtn.ghost{flex:0 0 46px;width:46px;min-width:46px;padding:10px 0;}
-  #pinInput{flex:0 0 96px;width:96px;min-width:0;}
   /* de-cramp the whole menu: tighter rhythm so everything fits on one screen */
   #joinScreen .modepick{margin:10px 0 4px;}
   #joinScreen .setrow{margin:6px 0 0;}
@@ -540,6 +583,7 @@
 <div id="joinScreen" class="screen">
   <canvas id="menuFx"></canvas>
   <div class="coinbar" id="coinBar"><span class="coinIcon">●</span> <span id="coinAmt">0</span></div>
+  <div class="levelchip hidden" id="levelChip"><span id="lvNum">Lv 1</span><span class="lvbar"><span id="lvFill"></span></span></div>
   <div id="lbKills" class="sideboard hidden"><h3>⚔ Top Kills</h3><div class="sb-rows" id="lbKillsRows"></div></div>
   <div id="lbWins" class="sideboard hidden"><h3>🏅 Top Wins</h3><div class="sb-rows" id="lbWinsRows"></div></div>
   <div class="joinwrap">
@@ -548,15 +592,17 @@
         <span class="L" data-letter="P" style="--d:0">P</span><span class="L" data-letter="A" style="--d:1">A</span><span class="L" data-letter="P2" style="--d:2">P</span><span class="L" data-letter="E" style="--d:3">E</span><span class="L" data-letter="R" style="--d:4">R</span><span class="L io" style="--d:5">io</span>
       </div>
       <div class="sub">Leave home, draw a loop, return to fill it.<br>Cut a rival's trail and steal everything they own. · v1.0</div>
-      <div id="authTabs" class="authtabs">
-        <button class="authtab active" data-auth="guest">Play as Guest</button>
-        <button class="authtab" data-auth="login">Log In</button>
-        <button class="authtab" data-auth="signup">Sign Up</button>
+      <div id="acctBar" class="acctbar">
+        <span id="acctStatus">👤 Playing as guest</span>
+        <span id="acctBtns">
+          <button class="ghost" id="loginOpenBtn">Log In</button>
+          <button class="ghost" id="signupOpenBtn">Sign Up</button>
+        </span>
+        <button class="ghost hidden" id="logoutBtn">Log Out</button>
       </div>
       <div id="nameRow" style="display:flex;gap:8px;align-items:center;">
         <input id="nameInput" maxlength="16" placeholder="enter your name" autocomplete="off" style="flex:1;" />
         <button class="ghost" id="diceBtn" title="Random name" style="padding:10px 12px;">🎲</button>
-        <input id="pinInput" maxlength="24" placeholder="password" type="password" autocomplete="off" style="width:120px;flex:0 0 auto;display:none;" />
       </div>
       <div class="modepick">
         <button class="modeopt active" data-mode="classic">
@@ -599,6 +645,8 @@
         <span id="playLabel">Play as Guest</span>
       </button>
       <div class="menurow">
+        <button class="ghost" id="questsBtn">🎯 Quests</button>
+        <button class="ghost" id="ranksBtn">🌍 Ranks</button>
         <button class="ghost" id="howBtn">❓ How to Play</button>
         <button class="ghost" id="shopBtn">🛒 Shop</button>
         <button class="ghost" id="skinsBtn">🎨 Skins</button>
@@ -612,12 +660,64 @@
   </div>
 </div>
 
+<!-- LOGIN screen -->
+<div id="loginScreen" class="screen authscreen hidden">
+  <div class="authcard">
+    <div class="authhead">Log In</div>
+    <input id="loginName" class="authinput" maxlength="16" placeholder="username" autocomplete="off" />
+    <input id="loginPass" class="authinput" maxlength="64" type="password" placeholder="password" autocomplete="off" />
+    <div id="loginErr" class="autherr"></div>
+    <button id="loginSubmit" class="authbtn">Log In</button>
+    <div class="authlinks">
+      <button class="linkbtn" id="toSignup">Create an account</button>
+      <button class="linkbtn" id="loginGuest">Continue as guest</button>
+    </div>
+  </div>
+</div>
+
+<!-- SIGN UP screen -->
+<div id="signupScreen" class="screen authscreen hidden">
+  <div class="authcard">
+    <div class="authhead">Create Account</div>
+    <input id="signupName" class="authinput" maxlength="16" placeholder="choose a username" autocomplete="off" />
+    <input id="signupPass" class="authinput" maxlength="64" type="password" placeholder="choose a password (4+ characters)" autocomplete="off" />
+    <div id="signupErr" class="autherr"></div>
+    <button id="signupSubmit" class="authbtn">Create Account</button>
+    <div class="authlinks">
+      <button class="linkbtn" id="toLogin">I already have an account</button>
+      <button class="linkbtn" id="signupGuest">Continue as guest</button>
+    </div>
+  </div>
+</div>
+
 <!-- STATS modal -->
 <div id="statsModal" class="modal hidden">
   <div class="modalcard">
     <div class="modalhead"><span>📊 Lifetime Stats</span><button class="x" data-close>✕</button></div>
     <p class="modalsub">Saved in this browser.</p>
     <div id="statsGrid" class="grid"></div>
+  </div>
+</div>
+
+<!-- DAILY QUESTS modal -->
+<div id="questsModal" class="modal hidden">
+  <div class="modalcard">
+    <div class="modalhead"><span>🎯 Daily Quests</span><button class="x" data-close>✕</button></div>
+    <p class="modalsub">Fresh quests every day. Rewards land instantly while you play.</p>
+    <div id="questsList" class="qlist"><div class="sb-empty">Log in to get daily quests.</div></div>
+  </div>
+</div>
+
+<!-- GLOBAL RANKS modal -->
+<div id="ranksModal" class="modal hidden">
+  <div class="modalcard">
+    <div class="modalhead"><span>🌍 Global Ranks</span><button class="x" data-close>✕</button></div>
+    <div class="ranktabs">
+      <button class="ranktab active" data-rank="level">Level</button>
+      <button class="ranktab" data-rank="kills">Kills</button>
+      <button class="ranktab" data-rank="wins">Wins</button>
+    </div>
+    <div id="ranksList" class="qlist"><div class="sb-empty">Loading…</div></div>
   </div>
 </div>
 
@@ -1047,8 +1147,7 @@
     activeMode = selectedMode;
     ws.onopen = () => { connected = true; statusEl.textContent='joining…';
       ws.send(JSON.stringify({t:'join', name, loadout: store.equip, skin: store.skin, mode: selectedMode, coins: store.coins,
-        auth: selectedAuth, pass: (document.getElementById('pinInput').value||'').trim(),
-        pin: (document.getElementById('pinInput').value||'').trim(),
+        auth: sessionToken ? 'session' : 'guest', token: sessionToken || null,
         nameToken: (store.ownedNames||{})[name.trim().toLowerCase()] || null })); };
     ws.onclose = () => { connected = false; statusEl.textContent='disconnected — refresh to reconnect'; };
     ws.onerror = () => { statusEl.textContent='connection error'; };
@@ -1059,10 +1158,16 @@
       if (m.t==='acct' || m.t==='acctsync'){ acctMode=true;
         if(typeof m.coins==='number'){ store.coins=m.coins; }
         if(m.cheats){ store.cheats=Object.assign({},m.cheats); }
+        if(typeof m.level==='number'){ store.level=m.level; store.xp=m.xp||0; store.into=m.into||0; store.need=m.need||1; }
+        if(Array.isArray(m.daily)){ store.daily=m.daily; if(!document.getElementById('questsModal').classList.contains('hidden')) renderQuests(); }
         saveStore(store); refreshCoinUI(); if(typeof renderCheatBar==='function') renderCheatBar();
+        if(typeof updateLevelChip==='function') updateLevelChip();
         if(m.name){ store.lastUser=m.name; store.lastAuth='login'; saveStore(store); }
         if(m.t==='acct') flashBanner('🔑 Signed in as '+(m.name||'you')+' — progress saved on the server', '#3cd070');
       }
+      else if (m.t==='levelup'){ Sound.win(); confetti(); flashBanner('⭐ LEVEL UP! You reached Level '+m.level, '#ffd23f'); }
+      else if (m.t==='questDone'){ Sound.coin(); flashBanner('🎯 Quest complete: '+m.text+'  +●'+m.coins+' · +'+m.xp+' XP', '#3cd070'); }
+      else if (m.t==='cheatResult'){ if(!m.ok){ if(m.reason==='guest') flashBanner('Cheats need an account — Log In or Sign Up first', '#ff5a7a'); else if(m.reason==='notowned') flashBanner('You do not own that cheat', '#ff5a7a'); } }
       else if (m.t==='buycheatResult'){
         if(m.ok){ store.coins=m.coins; store.cheats=Object.assign({},m.cheats); saveStore(store);
           renderCheats(); refreshCoinUI(); renderCheatBar(); }
@@ -2019,27 +2124,103 @@
   requestAnimationFrame(draw);
 
   // ---- start ----
-  // ---- AUTH: Guest / Log In / Sign Up ----
-  let selectedAuth = 'guest';
-  const pinInput = document.getElementById('pinInput');
-  function applyAuthUI(){
-    document.querySelectorAll('.authtab').forEach(t=>t.classList.toggle('active', t.dataset.auth===selectedAuth));
-    pinInput.style.display = selectedAuth==='guest' ? 'none' : '';
-    if(selectedAuth==='guest') pinInput.value='';
-    pinInput.placeholder = selectedAuth==='signup' ? 'choose a password' : 'password';
-    nameInput.placeholder = selectedAuth==='guest' ? 'enter your name' : 'username';
-    const lbl=document.getElementById('playLabel');
-    if(lbl) lbl.textContent = selectedAuth==='guest' ? 'Play as Guest' : selectedAuth==='login' ? 'Log In & Play' : 'Sign Up & Play';
+  // ---- AUTH: guest by default, real account via Log In / Sign Up screens ----
+  let sessionToken = store.sessionToken || null;
+  let loggedInName = (sessionToken && store.lastUser) ? store.lastUser : null;
+  const loginScreen=document.getElementById('loginScreen'), signupScreen=document.getElementById('signupScreen');
+
+  function updateAcctBar(){
+    const st=document.getElementById('acctStatus'), lo=document.getElementById('logoutBtn'), btns=document.getElementById('acctBtns');
+    const nameRow=document.getElementById('nameRow'), lbl=document.getElementById('playLabel');
+    if(sessionToken){
+      st.textContent='✓ '+(loggedInName||'Signed in');
+      lo.classList.remove('hidden'); btns.classList.add('hidden'); if(nameRow) nameRow.classList.add('hidden');
+      if(lbl) lbl.textContent='Play';
+    } else {
+      st.textContent='👤 Playing as guest';
+      lo.classList.add('hidden'); btns.classList.remove('hidden'); if(nameRow) nameRow.classList.remove('hidden');
+      if(lbl) lbl.textContent='Play as Guest';
+    }
+    if(typeof updateLevelChip==='function') updateLevelChip();
   }
-  document.querySelectorAll('.authtab').forEach(b=>b.onclick=()=>{ selectedAuth=b.dataset.auth; applyAuthUI(); if(selectedAuth!=='guest') pinInput.focus(); });
-  if(store.lastAuth==='login' && store.lastUser){ selectedAuth='login'; nameInput.value=store.lastUser; }
-  applyAuthUI();
+  function applyAuthOk(m, silent){
+    sessionToken=m.token; loggedInName=m.name; acctMode=true;
+    store.sessionToken=m.token; store.lastUser=m.name; store.lastAuth='login';
+    if(typeof m.coins==='number') store.coins=m.coins;
+    if(m.cheats) store.cheats=Object.assign({}, m.cheats);
+    if(typeof m.level==='number'){ store.level=m.level; store.xp=m.xp||0; store.into=m.into||0; store.need=m.need||1; }
+    if(Array.isArray(m.daily)) store.daily=m.daily;
+    saveStore(store); refreshCoinUI(); if(typeof renderCheatBar==='function') renderCheatBar();
+    updateAcctBar();
+    loginScreen.classList.add('hidden'); signupScreen.classList.add('hidden');
+    if(!silent) flashBanner('✓ '+(m.mode==='signup'?'Account created':'Signed in')+' — welcome, '+m.name+'!', '#3cd070');
+  }
+  function doLogout(){
+    sessionToken=null; loggedInName=null; acctMode=false;
+    delete store.sessionToken; store.lastAuth='guest'; saveStore(store);
+    updateAcctBar(); refreshCoinUI();
+    flashBanner('Logged out — playing as guest', '#9fb0aa');
+  }
+  function buyCheatAuthed(id, qty){
+    const proto=location.protocol==='https:'?'wss://':'ws://';
+    let w; try{ w=new WebSocket(proto+location.host); }catch(_){ flashBanner('Connection failed','#ff5a7a'); return; }
+    const to=setTimeout(()=>{ try{w.close();}catch(_){} }, 8000);
+    w.onopen=()=>w.send(JSON.stringify({t:'buycheat', token:sessionToken, id, qty}));
+    w.onmessage=(ev)=>{ try{ const m=JSON.parse(ev.data); if(m.t==='buycheatResult'){ clearTimeout(to); try{w.close();}catch(_){}
+      if(m.ok){ store.coins=m.coins; store.cheats=Object.assign({},m.cheats); saveStore(store); renderCheats(); refreshCoinUI(); renderCheatBar(); flashBanner('Cheat purchased!','#3cd070'); }
+      else flashBanner(m.reason==='poor'?'Not enough coins':(m.reason==='expired'?'Session expired — log in again':'Purchase failed'),'#ff5a7a');
+    } }catch(_){} };
+    w.onerror=()=>{ clearTimeout(to); flashBanner('Connection failed','#ff5a7a'); };
+  }
+  function authRequest(payload, cb){
+    let w; try{ const proto=location.protocol==='https:'?'wss://':'ws://'; w=new WebSocket(proto+location.host); }
+    catch(_){ cb({t:'authReject',message:'Connection failed.'}); return; }
+    const to=setTimeout(()=>{ try{w.close();}catch(_){}; cb({t:'authReject',message:'Connection timed out.'}); }, 8000);
+    w.onopen=()=>w.send(JSON.stringify(payload));
+    w.onmessage=(ev)=>{ try{ const m=JSON.parse(ev.data); if(m.t==='authOk'||m.t==='authReject'||m.t==='authExpired'){ clearTimeout(to); try{w.close();}catch(_){}; cb(m); } }catch(_){} };
+    w.onerror=()=>{ clearTimeout(to); cb({t:'authReject',message:'Connection failed.'}); };
+  }
+  document.getElementById('loginOpenBtn').onclick=()=>{ document.getElementById('loginErr').textContent=''; document.getElementById('loginName').value=store.lastUser||''; loginScreen.classList.remove('hidden'); signupScreen.classList.add('hidden'); document.getElementById('loginName').focus(); };
+  document.getElementById('signupOpenBtn').onclick=()=>{ document.getElementById('signupErr').textContent=''; signupScreen.classList.remove('hidden'); loginScreen.classList.add('hidden'); document.getElementById('signupName').focus(); };
+  document.getElementById('toSignup').onclick=()=>document.getElementById('signupOpenBtn').click();
+  document.getElementById('toLogin').onclick=()=>document.getElementById('loginOpenBtn').click();
+  document.getElementById('loginGuest').onclick=()=>loginScreen.classList.add('hidden');
+  document.getElementById('signupGuest').onclick=()=>signupScreen.classList.add('hidden');
+  document.getElementById('logoutBtn').onclick=doLogout;
+  function submitLogin(){
+    const name=(document.getElementById('loginName').value||'').trim();
+    const pass=(document.getElementById('loginPass').value||'');
+    const err=document.getElementById('loginErr'); err.textContent='';
+    if(!name){ err.textContent='Enter your username.'; return; }
+    if(pass.length<4){ err.textContent='Enter your password.'; return; }
+    err.textContent='Signing in…';
+    authRequest({t:'auth',mode:'login',name,pass}, m=>{ if(m.t==='authOk'){ document.getElementById('loginPass').value=''; applyAuthOk(m); } else err.textContent=m.message||'Login failed.'; });
+  }
+  function submitSignup(){
+    const name=(document.getElementById('signupName').value||'').trim();
+    const pass=(document.getElementById('signupPass').value||'');
+    const err=document.getElementById('signupErr'); err.textContent='';
+    if(!name){ err.textContent='Choose a username.'; return; }
+    if(pass.length<4){ err.textContent='Password must be at least 4 characters.'; return; }
+    err.textContent='Creating account…';
+    authRequest({t:'auth',mode:'signup',name,pass}, m=>{ if(m.t==='authOk'){ document.getElementById('signupPass').value=''; applyAuthOk(m); } else err.textContent=m.message||'Sign up failed.'; });
+  }
+  document.getElementById('loginSubmit').onclick=submitLogin;
+  document.getElementById('signupSubmit').onclick=submitSignup;
+  document.getElementById('loginPass').addEventListener('keydown',e=>{ if(e.key==='Enter') submitLogin(); });
+  document.getElementById('signupPass').addEventListener('keydown',e=>{ if(e.key==='Enter') submitSignup(); });
+  if(sessionToken){
+    authRequest({t:'resume',token:sessionToken}, m=>{
+      if(m.t==='authOk') applyAuthOk(m, true);
+      else { sessionToken=null; loggedInName=null; delete store.sessionToken; saveStore(store); updateAcctBar(); }
+    });
+  }
+  updateAcctBar();
 
   document.getElementById('playBtn').onclick = ()=>{
+    if(sessionToken){ connect(loggedInName||'Player'); return; }
     const name=(nameInput.value||'').trim().slice(0,16);
     if(!name){ flashBanner('Enter a name first', '#ff5a7a'); nameInput.focus(); return; }
-    if(selectedAuth!=='guest' && (pinInput.value||'').trim().length<4){
-      flashBanner('Password must be at least 4 characters', '#ff5a7a'); pinInput.focus(); return; }
     connect(name);
   };
   nameInput.addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('playBtn').click();});
@@ -2132,6 +2313,7 @@
     document.body.classList.remove('playing');
     acctMode=false;
     brState=null;
+    if(typeof updateAcctBar==='function') updateAcctBar();
     openMenuBoard();
     joinScreen.classList.remove('hidden');
     statusEl.textContent='';
@@ -2166,9 +2348,51 @@
   const cheatsModal=document.getElementById('cheatsModal');
   const trophiesModal=document.getElementById('trophiesModal');
   const statsModal=document.getElementById('statsModal');
-  function closeModals(){ shopModal.classList.add('hidden'); skinsModal.classList.add('hidden'); howModal.classList.add('hidden'); cheatsModal.classList.add('hidden'); trophiesModal.classList.add('hidden'); statsModal.classList.add('hidden'); }
+  const questsModal=document.getElementById('questsModal');
+  const ranksModal=document.getElementById('ranksModal');
+  function closeModals(){ shopModal.classList.add('hidden'); skinsModal.classList.add('hidden'); howModal.classList.add('hidden'); cheatsModal.classList.add('hidden'); trophiesModal.classList.add('hidden'); statsModal.classList.add('hidden'); questsModal.classList.add('hidden'); ranksModal.classList.add('hidden'); }
   document.querySelectorAll('[data-close]').forEach(b=>b.onclick=closeModals);
-  [shopModal,skinsModal,howModal,cheatsModal,trophiesModal,statsModal].forEach(m=>m.addEventListener('click',e=>{ if(e.target===m) closeModals(); }));
+  [shopModal,skinsModal,howModal,cheatsModal,trophiesModal,statsModal,questsModal,ranksModal].forEach(m=>m.addEventListener('click',e=>{ if(e.target===m) closeModals(); }));
+
+  // ---- progression UI: level chip, quests, global ranks ----
+  function loggedIn(){ return !!sessionToken || acctMode; }
+  function updateLevelChip(){
+    const chip=document.getElementById('levelChip'); if(!chip) return;
+    if(!loggedIn()){ chip.classList.add('hidden'); return; }
+    chip.classList.remove('hidden');
+    document.getElementById('lvNum').textContent='Lv '+(store.level||1);
+    const into=store.into||0, need=store.need||1;
+    document.getElementById('lvFill').style.width=Math.max(0,Math.min(100,into/need*100))+'%';
+  }
+  function renderQuests(){
+    const el=document.getElementById('questsList'); if(!el) return;
+    if(!loggedIn()){ el.innerHTML='<div class="sb-empty">Log in or sign up to get daily quests and rewards.</div>'; return; }
+    const q=store.daily||[];
+    if(!q.length){ el.innerHTML='<div class="sb-empty">No quests yet — jump into a game to receive today\'s set!</div>'; return; }
+    el.innerHTML=q.map(x=>{
+      const pct=Math.min(100,(x.prog/x.goal*100));
+      return `<div class="qrow${x.done?' done':''}"><div class="qt"><span>${escapeHtml(x.text)}</span><span class="qr">${x.done?'':'●'+x.coins+' · '+x.xp+'xp'}</span></div>`+
+        `<div class="qbar"><span style="width:${pct}%"></span></div>`+
+        `<div class="qnum">${Math.min(x.prog,x.goal)} / ${x.goal}</div></div>`;
+    }).join('');
+  }
+  let currentRankTab='level', lastRanks=null;
+  function renderRanks(){
+    const el=document.getElementById('ranksList'); if(!el) return;
+    if(!lastRanks){ el.innerHTML='<div class="sb-empty">Loading…</div>'; return; }
+    const list=lastRanks[currentRankTab]||[];
+    if(!list.length){ el.innerHTML='<div class="sb-empty">No ranked players yet — be the first!</div>'; return; }
+    const key=currentRankTab==='level'?'lvl':currentRankTab;
+    el.innerHTML=list.map((e,i)=>`<div class="rrow"><span class="rk">${i+1}</span><span class="dt" style="background:${e.c||'#bbb'}"></span>`+
+      `<span class="nm">${escapeHtml(e.n||'?')}<span class="lv">Lv${e.lvl||1}</span></span><span class="vl">${e[key]||0}</span></div>`).join('');
+  }
+  function requestRanks(){
+    if(menuWS&&menuWS.readyState===1){ menuWS.send(JSON.stringify({t:'globalboard'})); }
+    else { openMenuBoard(); setTimeout(()=>{ if(menuWS&&menuWS.readyState===1) menuWS.send(JSON.stringify({t:'globalboard'})); }, 700); }
+  }
+  document.getElementById('questsBtn').onclick=()=>{ renderQuests(); questsModal.classList.remove('hidden'); };
+  document.getElementById('ranksBtn').onclick=()=>{ lastRanks=null; renderRanks(); ranksModal.classList.remove('hidden'); requestRanks(); };
+  document.querySelectorAll('.ranktab').forEach(b=>b.onclick=()=>{ currentRankTab=b.dataset.rank; document.querySelectorAll('.ranktab').forEach(t=>t.classList.toggle('active',t===b)); renderRanks(); });
 
   function renderShop(){
     // self-heal: keep only valid, unique equipped ids within the slot limit
@@ -2328,11 +2552,7 @@
     }).join('');
     grid.querySelectorAll('[data-buycheat]').forEach(b=>b.onclick=()=>{
       const c=CHEATS.find(x=>x.id===b.dataset.buycheat);
-      if(acctMode){
-        if(connected&&ws&&ws.readyState===1) ws.send(JSON.stringify({t:'buycheat', id:c.id}));
-        else flashBanner('Join a game to buy cheats on your account', '#9fb0aa');
-        return;
-      }
+      if(loggedIn()){ buyCheatAuthed(c.id, 1); return; }
       if(store.coins>=c.cost){ store.coins-=c.cost; store.cheats[c.id]=(store.cheats[c.id]||0)+1;
         store.coinsSpent=(store.coinsSpent||0)+c.cost; saveStore(store);
         if(store.coinsSpent>=10000) awardTrophy('bigspender');
@@ -2342,11 +2562,7 @@
       const c=CHEATS.find(x=>x.id===b.dataset.buycheatmax);
       const qty=Math.min(99, Math.floor(store.coins/c.cost));
       if(qty<1){ flashBanner('Not enough coins', '#ff5a7a'); return; }
-      if(acctMode){
-        if(connected&&ws&&ws.readyState===1) ws.send(JSON.stringify({t:'buycheat', id:c.id, qty}));
-        else flashBanner('Join a game to buy cheats on your account', '#9fb0aa');
-        return;
-      }
+      if(loggedIn()){ buyCheatAuthed(c.id, qty); return; }
       store.coins-=c.cost*qty; store.cheats[c.id]=(store.cheats[c.id]||0)+qty;
       store.coinsSpent=(store.coinsSpent||0)+c.cost*qty; saveStore(store);
       if(store.coinsSpent>=10000) awardTrophy('bigspender');
@@ -2577,7 +2793,7 @@
     try{ const proto=location.protocol==='https:'?'wss://':'ws://'; menuWS=new WebSocket(proto+location.host); }
     catch(_){ return; }
     menuWS.onopen=()=>{ pollMenuBoard(); clearInterval(menuTimer); menuTimer=setInterval(pollMenuBoard,2500); };
-    menuWS.onmessage=(ev)=>{ try{ const m=JSON.parse(ev.data); if(m.t==='menuboard') renderMenuBoards(m.kills||[], m.wins||[]); }catch(_){}};
+    menuWS.onmessage=(ev)=>{ try{ const m=JSON.parse(ev.data); if(m.t==='menuboard') renderMenuBoards(m.kills||[], m.wins||[]); else if(m.t==='globalboard'){ lastRanks=m; renderRanks(); } }catch(_){}};
     menuWS.onclose=()=>{ clearInterval(menuTimer); menuWS=null; };
     menuWS.onerror=()=>{};
   }
@@ -2586,7 +2802,7 @@
     if(!list.length) return '<div class="sb-empty">No players yet</div>';
     return list.map((e,i)=>`<div class="sb-row"><span class="rk">${i+1}</span>`+
       `<span class="dt" style="background:${e.c||'#bbb'}"></span>`+
-      `<span class="nm">${escapeHtml(e.n||'?')}${e.b?' <span class=\"bt\">CPU</span>':''}</span>`+
+      `<span class="nm">${escapeHtml(e.n||'?')}${e.b?' <span class=\"bt\">CPU</span>':(e.lvl?' <span class=\"bt\">Lv'+e.lvl+'</span>':'')}</span>`+
       `<span class="vl">${e[key]||0}</span></div>`).join('');
   }
   function renderMenuBoards(kills, wins){
@@ -2595,6 +2811,7 @@
     if(w){ w.innerHTML=sbRows(wins,'w'); document.getElementById('lbWins').classList.remove('hidden'); }
   }
   openMenuBoard();
+  updateLevelChip();
   dailyBonus();     // run last: it calls addCoins() which needs late-declared state
 
   refreshCoinUI();
