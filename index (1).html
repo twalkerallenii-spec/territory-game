@@ -2071,12 +2071,18 @@
       const o=owner[y*GW+x];
       if(o!==0){ ctx.fillStyle=colorOf(o); ctx.fillRect(ox+x*cs, oy+y*cs, cs+0.6, cs+0.6); }
     }
-    // --- top highlight: lighten the upper edge of each region for a soft bevel
+    // --- bevel: lighten top edge + darken bottom edge of each region (3D tiles) ---
+    const strip=Math.max(1.5,cs*0.2);
     ctx.save();
-    ctx.fillStyle='rgba(255,255,255,0.22)';
+    ctx.fillStyle='rgba(255,255,255,0.28)';
     for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){
       const o=owner[y*GW+x];
-      if(o!==0 && ownerAt(x,y-1)!==o){ ctx.fillRect(ox+x*cs, oy+y*cs, cs+0.6, Math.max(1.5,cs*0.2)); }
+      if(o!==0 && ownerAt(x,y-1)!==o){ ctx.fillRect(ox+x*cs, oy+y*cs, cs+0.6, strip); }
+    }
+    ctx.fillStyle='rgba(0,0,0,0.16)';
+    for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){
+      const o=owner[y*GW+x];
+      if(o!==0 && ownerAt(x,y+1)!==o){ ctx.fillRect(ox+x*cs, oy+(y+1)*cs-strip, cs+0.6, strip); }
     }
     ctx.restore();
 
@@ -2086,10 +2092,11 @@
       const t=trail[y*GW+x];
       if(t!==0){
         const c=colorOf(t);
-        ctx.fillStyle=c; ctx.globalAlpha=0.85;
         const pad=cs*0.16;
-        roundRect(ox+x*cs+pad, oy+y*cs+pad, cs-pad*2, cs-pad*2, cs*0.28);
-        ctx.fill();
+        ctx.fillStyle=c; ctx.globalAlpha=0.9;
+        roundRect(ox+x*cs+pad, oy+y*cs+pad, cs-pad*2, cs-pad*2, cs*0.28); ctx.fill();
+        if(!store.lowGfx){ ctx.fillStyle=shade(c,0.45); ctx.globalAlpha=0.6; const p2=cs*0.3;
+          roundRect(ox+x*cs+p2, oy+y*cs+p2, cs-p2*2, cs-p2*2, cs*0.22); ctx.fill(); }
       }
     }
     ctx.globalAlpha=1; ctx.restore();
@@ -2161,11 +2168,19 @@
         ctx.beginPath(); ctx.arc(sx,sy,r*1.5,0,Math.PI*2); ctx.stroke();
         ctx.restore();
       }
-      // body (border is a darker shade of the same color, like paper.io)
-      ctx.fillStyle=bodyColor;
-      ctx.strokeStyle = shade(bodyColor,-0.35);
+      // glossy body: radial-gradient sheen + soft colored glow (high graphics)
+      ctx.save();
+      if(!store.lowGfx){
+        ctx.shadowColor=bodyColor; ctx.shadowBlur=r*0.85;
+        const grad=ctx.createRadialGradient(sx-r*0.35, sy-r*0.42, r*0.12, sx, sy, r*1.25);
+        grad.addColorStop(0, shade(bodyColor,0.38)); grad.addColorStop(0.55, bodyColor); grad.addColorStop(1, shade(bodyColor,-0.22));
+        ctx.fillStyle=grad;
+      } else ctx.fillStyle=bodyColor;
+      ctx.strokeStyle = shade(bodyColor,-0.42);
       ctx.lineWidth = (mine||watched)?3:2;
-      roundRect(sx-r,sy-r,r*2,r*2,r*0.45); ctx.fill(); ctx.stroke();
+      roundRect(sx-r,sy-r,r*2,r*2,r*0.48); ctx.fill();
+      ctx.shadowBlur=0; ctx.stroke();
+      ctx.restore();
       // highlight ring for me / spectated killer
       if(mine||watched){
         ctx.strokeStyle = mine ? 'rgba(255,255,255,0.9)' : '#fff';
@@ -2198,6 +2213,9 @@
         // pupil pushed toward the heading
         ctx.fillStyle='#222';
         ctx.beginPath(); ctx.arc(ex+dirv[0]*eyeR*0.4, ey+dirv[1]*eyeR*0.4, pupR,0,Math.PI*2); ctx.fill();
+        // glint
+        ctx.fillStyle='rgba(255,255,255,0.95)';
+        ctx.beginPath(); ctx.arc(ex-eyeR*0.32, ey-eyeR*0.32, Math.max(0.6,pupR*0.5),0,Math.PI*2); ctx.fill();
       }
       // name tag (me, watched target, and all humans)
       if(mine || watched || !e.bot){ drawNameTag(e, sx, sy, r, mine, watched); }

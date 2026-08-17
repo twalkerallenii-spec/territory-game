@@ -38,12 +38,12 @@ const CELL_PER_TICK = CELLS_PER_SEC / TICK_RATE;
 // Distinct, saturated colors that read clearly on a white paper background.
 // 36 hand-picked hues — more than ROOM_CAP, so no two live players ever share.
 const PALETTE = [
-  '#e6194b', '#3cb44b', '#4363d8', '#f58231', '#911eb4', '#1ba3a3',
-  '#f032e6', '#9bb800', '#e8762a', '#008080', '#a05bd6', '#9a6324',
-  '#c79a00', '#d11141', '#2a9d4a', '#5a6e00', '#c2691f', '#000075',
-  '#6b5b95', '#88154b', '#1f7a8c', '#b03a2e', '#2874a6', '#7d3c98',
-  '#cb4335', '#117864', '#b9770e', '#4a235a', '#1e6091', '#d4661a',
-  '#7a1fa2', '#2e8b57', '#c2185b', '#5d4037', '#00838f', '#827717',
+  '#ff3b6b', '#2ee66b', '#3d7bff', '#ff9f1c', '#b15cff', '#18d6c8',
+  '#ff4fd8', '#a6e22e', '#ff6a3d', '#00c2a8', '#8b5cf6', '#f2b134',
+  '#ffd23f', '#ff2e63', '#22c55e', '#7cc00f', '#f97316', '#4361ff',
+  '#9d7bff', '#e0359e', '#2dd4bf', '#ef4444', '#3b9dff', '#a855f7',
+  '#f43f5e', '#10b981', '#eab308', '#fb7185', '#38bdf8', '#f59e0b',
+  '#c026d3', '#34d399', '#f472b6', '#e07a3c', '#06b6d4', '#facc15',
 ];
 
 // ---- WORLD STATE (per-room; the active room's state is bound here) ---------
