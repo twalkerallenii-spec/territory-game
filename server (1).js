@@ -66,6 +66,9 @@ const MAP_SHAPES = [
   { id:'square', name:'The Square',  fn:shapeSquare },
   { id:'wide',   name:'The Field',   fn:shapeWide },
   { id:'tall',   name:'The Tower',   fn:shapeTall },
+  { id:'pillars',name:'The Pillars', fn:shapePillars },
+  { id:'arena',  name:'The Arena',   fn:shapeArena },
+  { id:'corners',name:'The Bastion', fn:shapeCorners },
 ];
 let currentMap = MAP_SHAPES[0];   // rebound per room by useRoom()
 
@@ -79,6 +82,19 @@ function fillRect(x0, y0, x1, y1){
 }
 
 function shapeSquare(){ const m=6; fillRect(m, m, GRID_W-1-m, GRID_H-1-m); }
+// Block an interior rectangle (a wall/pillar). Flat edges keep every neighbour
+// head-on reachable on the 4-dir grid, and the win% counts only playable cells,
+// so 100% stays achievable with obstacles present.
+function blockRect(x0, y0, x1, y1){ for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++) if(inBoundsRaw(x,y)) blocked[idx(x,y)]=1; }
+function shapePillars(){ const m=6; fillRect(m, m, GRID_W-1-m, GRID_H-1-m);
+  const cx=GRID_W>>1, cy=GRID_H>>1, s=5, d=Math.round(GRID_W*0.22);
+  blockRect(cx-d-s,cy-d-s,cx-d+s,cy-d+s); blockRect(cx+d-s,cy-d-s,cx+d+s,cy-d+s);
+  blockRect(cx-d-s,cy+d-s,cx-d+s,cy+d+s); blockRect(cx+d-s,cy+d-s,cx+d+s,cy+d+s); }
+function shapeArena(){ const m=6; fillRect(m, m, GRID_W-1-m, GRID_H-1-m);
+  const cx=GRID_W>>1, cy=GRID_H>>1, s=Math.round(GRID_W*0.13); blockRect(cx-s,cy-s,cx+s,cy+s); }
+function shapeCorners(){ const m=6; fillRect(m, m, GRID_W-1-m, GRID_H-1-m);
+  const s=Math.round(GRID_W*0.16), a=m, b=GRID_W-1-m, c=GRID_H-1-m;
+  blockRect(a,a,a+s,a+s); blockRect(b-s,a,b,a+s); blockRect(a,c-s,a+s,c); blockRect(b-s,c-s,b,c); }
 function shapeWide(){   // wide rectangle (letterbox)
   const mx=4, my=Math.round(GRID_H*0.18); fillRect(mx, my, GRID_W-1-mx, GRID_H-1-my); }
 function shapeTall(){   // tall rectangle (portrait)
@@ -109,7 +125,10 @@ const OPP = { N: 'S', S: 'N', E: 'W', W: 'E' };
 // game functions read via the module-level bindings above; useRoom(room) swaps
 // the bindings to point at that room before its logic runs, so the existing
 // ~40 functions work unchanged on whichever room is active.
-const VALID_MODES = ['classic', 'br', '3d', 'teams', 'tron', 'speed', 'tiny', 'bounty', 'chaos'];
+const VALID_MODES = ['classic', 'br', '3d', 'teams', 'tron', 'speed', 'tiny', 'bounty', 'chaos', 'koth'];
+const KOTH_R = 16;       // King-of-the-Hill zone radius (cells)
+const KOTH_WIN = 20;     // points needed to win a KotH round
+const KOTH_TICK = 1000;  // award a point every second to whoever holds the hill
 const rooms = {};   // mode -> Room
 
 function makeRoom(mode) {
@@ -130,6 +149,10 @@ function makeRoom(mode) {
     brEnding: false,
     brStart: 0,          // match start timestamp
     brStormInset: 0,     // how many cells the storm has eaten from each side
+    // King of the Hill
+    kothScores: {},      // tid -> points
+    kothAt: 0,           // next scoring tick
+    kothLeader: 0,       // current leader's tid (0 = contested/empty)
   };
   return r;
 }
@@ -1065,6 +1088,7 @@ function captureTerritory(e) {
 let roundResetting = false;   // rebound per room
 function roundReset(winner) {
   roundResetting = true;
+  if (activeRoom && activeRoom.mode === 'koth') { activeRoom.kothScores = {}; activeRoom.kothLeader = 0; }
   owner.fill(0);
   trail.fill(0);
   // pick a new random map shape for the next round
@@ -1550,6 +1574,32 @@ function tickRoom() {
   // Totems: reconcile ownership from the grid, run spreading, notify captures.
   processTotems(now);
 
+  // King of the Hill: hold the central zone with your snake to score. If exactly
+  // one team is inside, they earn a point each second; contested = nobody scores.
+  if (activeRoom && activeRoom.mode === 'koth' && now >= (activeRoom.kothAt || 0) && !roundResetting) {
+    activeRoom.kothAt = now + KOTH_TICK;
+    const cx = GRID_W >> 1, cy = GRID_H >> 1, present = {};
+    for (const e of entities.values()) {
+      if (e.dead) continue;
+      const dx = e.cx - cx, dy = e.cy - cy;
+      if (dx * dx + dy * dy <= KOTH_R * KOTH_R) present[tid(e)] = (present[tid(e)] || 0) + 1;
+    }
+    const teams = Object.keys(present);
+    activeRoom.kothLeader = teams.length === 1 ? +teams[0] : 0;
+    if (activeRoom.kothLeader) {
+      const leader = activeRoom.kothLeader, sc = activeRoom.kothScores;
+      sc[leader] = (sc[leader] || 0) + 1;
+      if (sc[leader] >= KOTH_WIN) {
+        const champ = [...entities.values()].find(e => tid(e) === leader);
+        const nm = champ ? champ.name : 'Someone';
+        if (champ) { const wa = acctOf(champ); if (wa) { wa.wins = (wa.wins || 0) + 1; creditAcct(champ, COIN_FULL_MAP); addXp(champ, 120); questBump(champ, 'wins', 1); } }
+        for (const e of entities.values()) if (!e.isBot && e.ws && e.ws.readyState === 1) send(e.ws, { t: 'kothwin', winner: nm, coins: COIN_FULL_MAP });
+        activeRoom.kothScores = {}; activeRoom.kothLeader = 0;
+        roundReset(champ);
+      }
+    }
+  }
+
   // Battle Royale: advance the storm and check for a winner.
   if (activeRoom && activeRoom.mode === 'br') {
     // Self-heal: if there's no active match but the room has entities, start one.
@@ -1682,6 +1732,14 @@ function broadcastState() {
   // changed" optimization caused late-joiners to start with an empty grid and
   // desync into a corrupted display, so it was removed. The big bandwidth wins
   // are skipping empty rooms and the half-rate broadcast, which are safe.)
+  let koth = null;
+  if (activeRoom && activeRoom.mode === 'koth') {
+    const sc = activeRoom.kothScores || {};
+    koth = { cx: GRID_W >> 1, cy: GRID_H >> 1, r: KOTH_R, win: KOTH_WIN, leader: activeRoom.kothLeader || 0,
+      scores: Object.keys(sc).map(id => { const e = [...entities.values()].find(x => tid(x) === +id);
+        return { id: +id, name: e ? e.name : '?', color: e ? e.color : '#888', pts: sc[id] }; })
+        .sort((a, b) => b.pts - a.pts).slice(0, 6) };
+  }
   const msg = JSON.stringify({
     t: 'state',
     w: GRID_W, h: GRID_H,
@@ -1689,6 +1747,7 @@ function broadcastState() {
     trail: rleEncode(trail),
     ents,
     br,
+    koth,
     tot: totems.map(t => ({ x: t.x, y: t.y, ty: t.type, o: t.owner || 0, p: t.pair || 0 })),
   });
   for (const e of entities.values()) {
@@ -1869,6 +1928,17 @@ wss.on('connection', (ws) => {
       if (qty < 1) { send(ws, { t: 'buycheatResult', ok: false, reason: 'poor', coins: a.coins }); return; }
       a.coins -= cost * qty; a.cheats[m.id] = (a.cheats[m.id] || 0) + qty; saveAccounts();
       send(ws, { t: 'buycheatResult', ok: true, id: m.id, coins: a.coins, cheats: a.cheats });
+      return;
+    }
+    // Generic coin spend for account holders (skins / power-ups / crates).
+    // The client owns the *item* inventory; the server owns the coin balance.
+    if (m.t === 'buy' && m.token) {
+      const key = sessions['' + m.token];
+      if (!key || !accounts[key]) { send(ws, { t: 'buyResult', ok: false, reason: 'expired' }); return; }
+      const a = accounts[key], cost = Math.max(1, Math.floor(Number(m.cost) || 0));
+      if ((a.coins || 0) < cost) { send(ws, { t: 'buyResult', ok: false, reason: 'poor', coins: a.coins }); return; }
+      a.coins -= cost; saveAccounts();
+      send(ws, { t: 'buyResult', ok: true, coins: a.coins });
       return;
     }
 
