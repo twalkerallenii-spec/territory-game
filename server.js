@@ -438,6 +438,9 @@ function addXp(p, n) {
   acctSync(p);
 }
 const QUEST_POOL = [
+  { id: 'cells400', text: 'Capture 400 cells of land', goal: 400, metric: 'cells', coins: 350, xp: 180 },
+  { id: 'cells1k',  text: 'Capture 1,000 cells of land', goal: 1000, metric: 'cells', coins: 800, xp: 400 },
+  { id: 'totem2',   text: 'Capture 2 totems',       goal: 2,  metric: 'totem', coins: 450, xp: 220 },
   { id: 'kills5',  text: 'Cut 5 rivals',           goal: 5,  metric: 'kills', coins: 300, xp: 150 },
   { id: 'kills12', text: 'Cut 12 rivals',          goal: 12, metric: 'kills', coins: 700, xp: 350 },
   { id: 'win1',    text: 'Win a round or match',   goal: 1,  metric: 'wins',  coins: 500, xp: 300 },
@@ -760,6 +763,7 @@ function processTotems(now) {
       if (t.owner) {
         const claimer = [...entities.values()].find(e => tid(e) === t.owner && !e.isBot);
         if (claimer && claimer.ws && claimer.ws.readyState === 1) send(claimer.ws, { t: 'totemGet', ty: t.type });
+        if (claimer) { questBump(claimer, 'totem', 1); addXp(claimer, 20); }
       }
     }
     if (t.type === 'spread') {
@@ -977,6 +981,7 @@ function checkBrWin() {
 // territory + trail, padded by 1.
 function captureTerritory(e) {
   if (e.trailCells.length === 0) return;
+  e._preCapArea = e.area || 0;
 
   let minX = GRID_W, minY = GRID_H, maxX = 0, maxY = 0;
   const expand = (x, y) => {
@@ -1046,6 +1051,14 @@ function captureTerritory(e) {
   recomputeArea(e);
   const mateCap = e.team ? teammateOf(e) : null;
   if (mateCap) recomputeArea(mateCap);
+
+  // Quests/XP: reward the land just banked (area delta measured by the caller's
+  // recompute above; approximate via trail length + enclosed count is overkill —
+  // the area recompute already ran, so diff against the pre-capture snapshot).
+  if (!e.isBot && e._preCapArea != null) {
+    const gained = Math.max(0, (e.area || 0) - e._preCapArea);
+    if (gained > 0) { questBump(e, 'cells', gained); if (gained >= 40) addXp(e, Math.min(30, 2 + (gained / 25 | 0))); }
+  }
 
   // Enemies who lost land: recompute; zero-territory rule => keep playing
   // (their avatar persists), matching the "release to neutral" fairness choice.
@@ -1456,6 +1469,25 @@ function botThink(e) {
     if (hd && hd !== OPP[e.heading]) {
       const [tx, ty] = DIRS[hd];
       if (cellSafeForBot(e, e.cx + tx, e.cy + ty)) { e.pendingTurn = hd; return; }
+    }
+  }
+
+  // OBJECTIVE — KotH bots fight for the hill; elsewhere, bots sometimes loop
+  // toward an unowned totem so humans have competition for objectives.
+  if (activeRoom && Math.random() < 0.25) {
+    let tx = null, ty = null;
+    if (activeRoom.mode === 'koth') {
+      const cx = GRID_W >> 1, cy = GRID_H >> 1, ddx = e.cx - cx, ddy = e.cy - cy;
+      if (ddx * ddx + ddy * ddy > KOTH_R * KOTH_R) { tx = cx; ty = cy; }
+    } else if (totems.length && Math.random() < 0.35) {
+      let best = null, bd = 1e9;
+      for (const t of totems) if (t.owner !== tid(e)) { const d = Math.abs(t.x - e.cx) + Math.abs(t.y - e.cy); if (d < bd && d < 45) { bd = d; best = t; } }
+      if (best) { tx = best.x; ty = best.y; }
+    }
+    if (tx != null && exposure <= e.botGreed) {
+      const dh = Math.abs(tx - e.cx) > Math.abs(ty - e.cy) ? (tx > e.cx ? 'E' : 'W') : (ty > e.cy ? 'S' : 'N');
+      if (dh !== OPP[e.heading]) { const [vx, vy] = DIRS[dh];
+        if (cellSafeForBot(e, e.cx + vx, e.cy + vy)) { e.pendingTurn = dh; return; } }
     }
   }
 

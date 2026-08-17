@@ -141,6 +141,19 @@
   #kothScores .kr .pt{color:#ffd23f;font-weight:700;font-variant-numeric:tabular-nums;}
   #dangerFade{position:fixed;inset:0;z-index:4;pointer-events:none;opacity:0;transition:opacity .18s;
     background:radial-gradient(120% 120% at 50% 50%, transparent 55%, rgba(255,45,65,.42) 100%);}
+  #gfxBtn{position:absolute;top:14px;right:158px;width:40px;height:40px;border-radius:12px;
+    background:rgba(20,34,31,.7);border:1px solid rgba(255,255,255,.1);color:#dfeae6;font-size:17px;cursor:pointer;z-index:5;transition:transform .1s,color .12s;}
+  #gfxBtn:hover{transform:translateY(-1px);color:var(--accent);}
+  #boardTitle{cursor:pointer;user-select:none;}
+  #boardTitle::after{content:attr(data-c);float:right;color:var(--muted);font-weight:700;}
+  #board.collapsed{width:auto;min-width:118px;}
+  #board.collapsed #boardRows{display:none;}
+  @media (max-width:640px){
+    #board{top:8px;right:8px;width:150px;padding:8px 10px;}
+    #board h2{font-size:10px;margin-bottom:6px;}
+    #board .row{font-size:11px;padding:2px 0;gap:6px;}
+    #gfxBtn{right:150px;} #fsBtn{right:104px;} #muteBtn{right:58px;} #homeBtn{right:12px;}
+  }
   .tuts{display:flex;flex-direction:column;gap:14px;margin-top:4px;}
   .tut{display:flex;gap:12px;align-items:flex-start;font-size:13.5px;line-height:1.5;color:#dfeae6;}
   .tut .tutic{font-size:22px;flex:0 0 auto;}
@@ -584,8 +597,9 @@
   </button>
   <button id="muteBtn" title="Sound on/off" aria-label="Mute">🔊</button>
   <button id="fsBtn" title="Fullscreen" aria-label="Fullscreen">⛶</button>
+  <button id="gfxBtn" title="Graphics quality" aria-label="Graphics">✨</button>
   <div id="board" class="card">
-    <h2 id="boardTitle">Leaderboard</h2>
+    <h2 id="boardTitle" data-c="▾">Leaderboard</h2>
     <div id="boardRows"></div>
   </div>
   <div id="boostWrap" class="hidden">
@@ -971,10 +985,14 @@
     {id:'pizza',   nm:'Pizza',     color:'#ffb703',  emoji:'🍕', cost:500},
     {id:'bolt',    nm:'Bolt',      color:'#ffd23f',  emoji:'⚡', cost:500},
     {id:'forest',  nm:'Forest',    color:'#2e8b57',  emoji:null,  cost:100},
-    {id:'grape',   nm:'Grape',     color:'#8e44ad',  emoji:null,  cost:120},
     {id:'gold',    nm:'Gold',      color:'#f1c40f',  emoji:null,  cost:200},
     {id:'rose',    nm:'Rose',      color:'#ff5a7a',  emoji:null,  cost:150},
-    {id:'mint',    nm:'Mint',      color:'#1abc9c',  emoji:null,  cost:120},
+    {id:'aurora',  nm:'Aurora',    color:'#5eead4',  emoji:null,  cost:200},
+    {id:'magma',   nm:'Magma',     color:'#ff5722',  emoji:null,  cost:200},
+    {id:'neon',    nm:'Neon',      color:'#39ff14',  emoji:null,  cost:250},
+    {id:'royal',   nm:'Royal',     color:'#7c3aed',  emoji:null,  cost:250},
+    {id:'candy',   nm:'Candy',     color:'#ff6ec7',  emoji:null,  cost:180},
+    {id:'ember',   nm:'Ember',     color:'#f0561d',  emoji:null,  cost:220},
     {id:'e_fire',  nm:'Fire',      color:'#ff5a2b',  emoji:'🔥',  cost:150},
     {id:'e_star',  nm:'Star',      color:'#ffd23f',  emoji:'⭐',  cost:150},
     {id:'e_skull', nm:'Skull',     color:'#cfd8dc',  emoji:'💀',  cost:200},
@@ -983,6 +1001,16 @@
     {id:'e_heart', nm:'Heart',     color:'#ff4d6d',  emoji:'❤️',  cost:180},
     {id:'e_crown', nm:'Crown',     color:'#f4c430',  emoji:'👑',  cost:250},
     {id:'e_robot', nm:'Robot',     color:'#9fb3c8',  emoji:'🤖',  cost:220},
+    {id:'e_diamond',nm:'Diamond',  color:'#a0e9ff',  emoji:'💎',  cost:450},
+    {id:'e_rocket', nm:'Rocket',   color:'#ff7b54',  emoji:'🚀',  cost:350},
+    {id:'e_ninja',  nm:'Ninja',    color:'#2c3e50',  emoji:'🥷',  cost:300},
+    {id:'e_frog',   nm:'Frog',     color:'#4caf50',  emoji:'🐸',  cost:250},
+    {id:'e_cat',    nm:'Cat',      color:'#ffb74d',  emoji:'🐱',  cost:250},
+    {id:'e_wave',   nm:'Wave',     color:'#00bcd4',  emoji:'🌊',  cost:280},
+    {id:'e_devil',  nm:'Devil',    color:'#e53935',  emoji:'😈',  cost:320},
+    {id:'e_rainbow',nm:'Rainbow',  color:'#ff2e97',  emoji:'🌈',  cost:500},
+    {id:'e_bee',    nm:'Bee',      color:'#f4c20d',  emoji:'🐝',  cost:260},
+    {id:'e_snow',   nm:'Snowman',  color:'#e8f4ff',  emoji:'⛄',  cost:240},
   ];
   const MAX_EQUIP = 3;
 
@@ -1145,7 +1173,7 @@
   document.getElementById('mystat').appendChild(killChip);
   let sessionKills=0;
   // D7 rotating splash tips
-  const TIPS=['Cut a trail to steal ALL their land','Shift = boost · Space = respawn','Z X C V send quick emotes',
+  const TIPS=['Cut a trail to steal ALL their land','Shift = boost · Space = respawn','Z X C V B G H J send quick emotes',
     'Own your name forever with 🔒','Tron: every trail is a wall','Chain round wins for 🔥 flames',
     'Bounty mode: cut #1 for 5× coins','Open a Mystery Crate in Skins 📦','While dead: ◀ ▶ changes who you watch','Loop around a totem to claim its power'];
   const tipEl=document.getElementById('tipLine');
@@ -1543,7 +1571,7 @@
       return;
     }
     // QUICK-CHAT EMOTES: Z/X/C/V send preset messages.
-    const EMOTES={KeyZ:'gg',KeyX:'nice!',KeyC:'😱',KeyV:'😂'};
+    const EMOTES={KeyZ:'gg',KeyX:'nice!',KeyC:'😱',KeyV:'😂',KeyB:'🔥',KeyG:'gg wp',KeyH:'👑',KeyJ:'💀'};
     if (EMOTES[e.code] && connected && ws && ws.readyState===1){
       ws.send(JSON.stringify({t:'chat', text:EMOTES[e.code]}));
       store.chatSent=(store.chatSent||0)+1; saveStore(store);
@@ -2870,6 +2898,16 @@
       mmCtx.beginPath(); mmCtx.arc(px,py, id===myId?3:2, 0,Math.PI*2); mmCtx.fill();
       if(id===myId){ mmCtx.strokeStyle='#111'; mmCtx.lineWidth=1; mmCtx.beginPath(); mmCtx.arc(px,py,4,0,Math.PI*2); mmCtx.stroke(); }
     }
+    // totems
+    if(typeof totemList!=='undefined' && totemList.length){
+      for(const t of totemList){ const te=ents.get(t.o); mmCtx.fillStyle = t.o ? (te?te.color:'#ffd23f') : '#c9d2cc';
+        mmCtx.fillRect(t.x*sx-1.5, t.y*sy-1.5, 3.5, 3.5); }
+    }
+    // King-of-the-Hill zone
+    if(typeof kothState!=='undefined' && kothState){
+      mmCtx.strokeStyle='#ffd23f'; mmCtx.lineWidth=1.5;
+      mmCtx.beginPath(); mmCtx.arc(kothState.cx*sx, kothState.cy*sy, kothState.r*sx, 0, Math.PI*2); mmCtx.stroke();
+    }
     mmCtx.strokeStyle='rgba(120,110,90,.4)'; mmCtx.lineWidth=2; mmCtx.strokeRect(1,1,W-2,H-2);
   }
 
@@ -3012,6 +3050,17 @@
   }
   { const a=document.getElementById('fsBtn'); if(a) a.onclick=toggleFullscreen;
     const bb=document.getElementById('fsMenuBtn'); if(bb) bb.onclick=toggleFullscreen; }
+  // collapsible leaderboard (great for phones)
+  { const boardEl=document.getElementById('board'), bt=document.getElementById('boardTitle');
+    function setCollapsed(v){ if(!boardEl)return; boardEl.classList.toggle('collapsed',v); if(bt) bt.dataset.c=v?'▸':'▾'; store.boardCollapsed=v; saveStore(store); }
+    if(bt){ bt.onclick=()=>setCollapsed(!boardEl.classList.contains('collapsed')); }
+    setCollapsed(store.boardCollapsed!=null ? store.boardCollapsed : (innerWidth<=640)); }
+  // in-game graphics-quality toggle
+  { const g=document.getElementById('gfxBtn');
+    function refreshGfxBtn(){ if(g){ g.textContent=store.lowGfx?'⚡':'✨'; g.title=store.lowGfx?'Low graphics (tap for full)':'Full graphics (tap for low)'; } }
+    if(g){ g.onclick=()=>{ store.lowGfx=!store.lowGfx; document.body.classList.toggle('lowgfx',!!store.lowGfx); saveStore(store);
+      const chk=document.getElementById('lowGfxChk'); if(chk) chk.checked=!!store.lowGfx; refreshGfxBtn();
+      flashBanner(store.lowGfx?'⚡ Low graphics':'✨ Full graphics','#9fb0aa'); }; refreshGfxBtn(); } }
 
   dailyBonus();     // run last: it calls addCoins() which needs late-declared state
 
